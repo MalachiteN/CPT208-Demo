@@ -1,0 +1,29 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    depends_on:
+      - whisper
+      - mediamtx
+
+  whisper:
+    image: ghcr.io/ggerganov/whisper.cpp:main-cuda
+    command: ["./server", "--host", "0.0.0.0", "--port", "8080", "-m", "/app/models/ggml-large-v3-turbo-q5_0.bin"]
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./models:/app/models:ro
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    restart: unless-stopped
+    ports:
+      - "8554:8554"
+      - "8888:8888"

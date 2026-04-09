@@ -1,0 +1,85 @@
+/* Create Page (Lobby) Styles */
+
+.create-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.room-info {
+  background: #2c3e50;
+  color: white;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.room-info h2 {
+  font-size: 1rem;
+  color: #bdc3c7;
+  margin-bottom: 5px;
+}
+
+.room-info .room-id {
+  font-size: 1.8rem;
+  font-weight: bold;
+  letter-spacing: 2px;
+  font-family: 'Courier New', monospace;
+}
+
+.start-btn {
+  padding: 15px 30px;
+  font-size: 1.1rem;
+}
+
+.member-list-section {
+  margin-bottom: 20px;
+}
+
+.member-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.empty-list {
+  text-align: center;
+  color: #7f8c8d;
+  padding: 30px;
+  font-style: italic;
+}
+
+.add-bot-section {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
+.add-bot-section h3 {
+  margin-bottom: 15px;
+  color: #2c3e50;
+}
+
+.add-bot-form {
+  display: grid;
+  gap: 15px;
+}
+
+.add-bot-form .form-row {
+  display: flex;
+  gap: 10px;
+}
+
+.add-bot-form input,
+.add-bot-form textarea {
+  flex: 1;
+}
+
+.bot-presence {
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 5px;
+}

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Summary - XJTLU Discussion</title>
+  <link rel="stylesheet" href="/css/common.css">
+  <link rel="stylesheet" href="/css/summary.css">
+</head>
+<body>
+  <div class="summary-container">
+    <div class="summary-header">
+      <h1>Discussion Summary</h1>
+      <p>Review of your group discussion session</p>
+    </div>
+
+    <!-- Rubric Emoji Strip -->
+    <div class="rubric-strip">
+      <div class="rubric-item">
+        <div id="emoji-everyone" class="rubric-emoji">⏳</div>
+        <div class="rubric-label">Everyone Spoke</div>
+        <div id="value-everyone" class="rubric-value">Waiting...</div>
+      </div>
+      <div class="rubric-item">
+        <div id="emoji-interruption" class="rubric-emoji">⏳</div>
+        <div class="rubric-label">Valid Interruption</div>
+        <div id="value-interruption" class="rubric-value">Waiting...</div>
+      </div>
+      <div class="rubric-item">
+        <div id="emoji-leader" class="rubric-emoji">⏳</div>
+        <div class="rubric-label">Leader ≠ Last Speaker</div>
+        <div id="value-leader" class="rubric-value">Waiting...</div>
+      </div>
+    </div>
+
+    <!-- Fixed Rubrics Section -->
+    <div class="summary-section">
+      <h3>Session Statistics</h3>
+      <div id="fixed-rubrics" class="fixed-rubrics">
+        <div class="rubric-result">
+          <div class="rubric-result-label">Discussion Leader</div>
+          <div id="leader-value" class="rubric-result-value">-</div>
+        </div>
+        <div class="rubric-result">
+          <div class="rubric-result-label">Last Speaker</div>
+          <div id="last-speaker-value" class="rubric-result-value">-</div>
+        </div>
+        <div class="rubric-result">
+          <div class="rubric-result-label">Current Round Index</div>
+          <div id="rounds-value" class="rubric-result-value">-</div>
+        </div>
+        <div class="rubric-result">
+          <div class="rubric-result-label">Total Messages</div>
+          <div id="messages-value" class="rubric-result-value">-</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Evaluator Summary Section -->
+    <div class="summary-section">
+      <h3>AI Evaluator Summary</h3>
+      <div id="summary-text" class="summary-text-container">
+        Waiting for summary...
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="summary-actions">
+      <button id="reset-btn" class="btn btn-primary reset-btn">
+        Start New Session
+      </button>
+    </div>
+  </div>
+
+  <script src="/js/common/storage.js"></script>
+  <script src="/js/common/api.js"></script>
+  <script src="/js/common/websocket.js"></script>
+  <script src="/js/common/ui.js"></script>
+  <script src="/js/pages/summary.js"></script>
+</body>
+</html>

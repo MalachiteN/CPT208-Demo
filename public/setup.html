@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Setup - XJTLU Discussion</title>
+  <link rel="stylesheet" href="/css/common.css">
+  <link rel="stylesheet" href="/css/setup.css">
+</head>
+<body>
+  <div class="setup-container">
+    <div class="setup-title">
+      <h1>XJTLU Discussion Practice</h1>
+      <p>Anonymous group discussion rehearsal environment</p>
+    </div>
+
+    <div id="message-container"></div>
+
+    <div class="card uuid-section">
+      <label>Your Anonymous ID</label>
+      <div id="uuid-display" class="uuid-display">Loading...</div>
+      <p id="uuid-help-text" class="text-center mt-1 uuid-help-text">
+        This ID identifies you for this session only
+      </p>
+    </div>
+
+    <div id="fresh-setup-section" class="actions-section">
+      <div class="action-card">
+        <h3>Join a Room</h3>
+        <p>Enter a room ID to join an existing discussion room</p>
+        <div class="join-form">
+          <input 
+            type="text" 
+            id="room-id-input" 
+            placeholder="Enter room ID (e.g., R12345)"
+            autocomplete="off"
+          >
+          <button id="join-btn" class="btn btn-primary">Join Room</button>
+        </div>
+      </div>
+
+      <div class="action-card">
+        <h3>Create a Room</h3>
+        <p>Create a new room and become the owner</p>
+        <button id="create-btn" class="btn btn-success btn-large create-btn">
+          Create New Room
+        </button>
+      </div>
+    </div>
+
+    <div id="joined-lobby-section" class="joined-lobby-section hidden">
+      <div class="card waiting-card">
+        <div class="card-title">Joined Room Waiting Lobby</div>
+        <div class="waiting-grid">
+          <div>
+            <div class="waiting-label">Joined Room ID</div>
+            <div id="joined-room-id" class="waiting-value">-</div>
+          </div>
+          <div>
+            <div class="waiting-label">Lobby Status</div>
+            <div id="waiting-status" class="waiting-value waiting-status">Waiting for owner to start discussion</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card member-list-card">
+        <div class="card-title">Live Member List</div>
+        <ul id="joined-member-list" class="list member-list">
+          <li class="empty-list">Waiting for room data...</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common/storage.js"></script>
+  <script src="/js/common/api.js"></script>
+  <script src="/js/common/websocket.js"></script>
+  <script src="/js/common/ui.js"></script>
+  <script src="/js/pages/setup.js"></script>
+</body>
+</html>

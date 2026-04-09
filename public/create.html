@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lobby - XJTLU Discussion</title>
+  <link rel="stylesheet" href="/css/common.css">
+  <link rel="stylesheet" href="/css/create.css">
+</head>
+<body>
+  <div class="create-container">
+    <div id="message-container"></div>
+
+    <div class="room-info">
+      <div>
+        <h2>Room ID</h2>
+        <div id="room-id-display" class="room-id">Loading...</div>
+      </div>
+      <button id="start-discussion-btn" class="btn btn-success start-btn">
+        Start Discussion
+      </button>
+    </div>
+
+    <div class="card member-list-section">
+      <div class="card-title">Room Members</div>
+      <ul id="member-list" class="list member-list">
+        <li class="empty-list">No members yet</li>
+      </ul>
+    </div>
+
+    <div class="add-bot-section">
+      <h3>Add AI Bot Member</h3>
+      <div class="add-bot-form">
+        <div class="form-row">
+          <input 
+            type="text" 
+            id="bot-name-input" 
+            placeholder="Bot name (e.g., AliceBot)"
+            autocomplete="off"
+          >
+        </div>
+        <textarea 
+          id="bot-persona-input" 
+          placeholder="Bot personality/persona description (e.g., 'A proactive leader with intermediate English skills')"
+          rows="3"
+        ></textarea>
+        <button id="add-bot-btn" class="btn btn-primary">Add Bot</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common/storage.js"></script>
+  <script src="/js/common/api.js"></script>
+  <script src="/js/common/websocket.js"></script>
+  <script src="/js/common/ui.js"></script>
+  <script src="/js/pages/create.js"></script>
+</body>
+</html>

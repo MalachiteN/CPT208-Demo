@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Discussion - XJTLU Discussion</title>
+  <link rel="stylesheet" href="/css/common.css">
+  <link rel="stylesheet" href="/css/discuss.css">
+</head>
+<body class="discuss-page">
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <div class="current-speaker">
+      <span class="current-speaker-label">Current Speaker:</span>
+      <span id="current-speaker-name" class="current-speaker-name">None</span>
+      <span id="speaking-indicator" class="status-dot" style="display: none;"></span>
+    </div>
+    <div class="round-info">
+      <span id="round-badge" class="round-badge">Round 1</span>
+      <button id="end-discussion-btn" class="btn btn-danger" style="display: none;">
+        End Discussion
+      </button>
+    </div>
+  </div>
+
+  <!-- Message Area -->
+  <div id="message-area" class="message-area">
+    <div id="message-list" class="message-list">
+      <!-- Messages will be added here -->
+    </div>
+  </div>
+
+  <!-- Control Bar -->
+  <div class="control-bar">
+    <button id="speech-btn" class="btn btn-primary control-btn" disabled>
+      Start Speaking
+    </button>
+    <button id="interrupt-btn" class="btn btn-warning control-btn" disabled>
+      Interrupt
+    </button>
+    <button id="hint-btn" class="btn btn-secondary control-btn" disabled>
+      AI Hint
+    </button>
+  </div>
+
+  <!-- Next Speaker Modal -->
+  <div id="next-speaker-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Select Next Speaker</h3>
+      <p style="margin-bottom: 15px; color: #666;">
+        Choose who will speak next in this round
+      </p>
+      <div id="speaker-options" class="speaker-options">
+        <!-- Speaker options will be added here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Interrupt Response Modal -->
+  <div id="interrupt-modal" class="modal-overlay hidden">
+    <div class="modal interrupt-modal">
+      <h3>Interruption Request</h3>
+      <div class="interrupt-info">
+        <span id="interrupt-requester"></span> wants to interrupt your speech
+      </div>
+      <div class="interrupt-actions">
+        <button id="accept-interrupt-btn" class="btn btn-success">Accept</button>
+        <button id="reject-interrupt-btn" class="btn btn-danger">Reject</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Discussion Confirmation Modal -->
+  <div id="end-confirm-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>End Discussion?</h3>
+      <p style="margin-bottom: 20px; color: #666;">
+        Are you sure you want to end the discussion? This will move everyone to the summary phase.
+      </p>
+      <div class="interrupt-actions">
+        <button id="confirm-end-btn" class="btn btn-danger">Yes, End Discussion</button>
+        <button id="cancel-end-btn" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common/storage.js"></script>
+  <script src="/js/common/api.js"></script>
+  <script src="/js/common/websocket.js"></script>
+  <script src="/js/common/ui.js"></script>
+  <script src="/js/pages/discuss.js"></script>
+</body>
+</html>
