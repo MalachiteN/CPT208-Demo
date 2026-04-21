@@ -11,11 +11,16 @@ export const config = {
   // Cleanup
   roomCleanupTimeoutMs: parseInt(process.env.ROOM_CLEANUP_TIMEOUT_MS || "30000", 10),
 
-  // Future integration placeholders
-  whisperUrl: process.env.WHISPER_URL || "http://localhost:8080",
-  mediamtxUrl: process.env.MEDIAMTX_URL || "http://localhost:9997",
-  llmApiUrl: process.env.LLM_API_URL || "",
-  llmApiKey: process.env.LLM_API_KEY || "",
+  // LLM configuration (Stage 2)
+  openaiBaseUrl: process.env.OPENAI_BASEURL || "https://zenmux.ai/api/v1",
+  openaiApiKey: process.env.OPENAI_API_KEY || "",
+  roleplayModel: process.env.ROLEPLAY_MODEL || "minimax/minimax-m2-her",
+  hintModel: process.env.HINT_MODEL || "stepfun/step-3.5-flash",
+  summaryModel: process.env.SUMMARY_MODEL || "moonshotai/kimi-k2.5",
+
+  // External service URLs (Stage 2)
+  whisperBaseUrl: process.env.WHISPER_BASEURL || "http://localhost:8080",
+  mediamtxBaseUrl: process.env.MEDIAMTX_BASEURL || "http://localhost:8888",
 };
 
 export default config;

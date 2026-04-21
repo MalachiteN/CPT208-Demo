@@ -183,6 +183,7 @@ export function startDiscussion(ownerUuid: string, roomId: string): ServiceResul
   const discussionState: DiscussionState = {
     currentRound: 1,
     currentSpeakerMemberId: null,
+    currentSpeakerActive: false,
     roundSpokenMemberIds: [],
     leaderMemberId: null,
     lastSpeakerMemberId: null,
@@ -217,7 +218,7 @@ export function endDiscussion(ownerUuid: string, roomId: string): ServiceResult<
   const spokenMemberIds = new Set<string>();
 
   discussion.messages.forEach((msg) => {
-    if (msg.speakerMemberId && msg.type === "speech") {
+    if (msg.speakerMemberId && (msg.type === "speech" || msg.type === "bot_final")) {
       spokenMemberIds.add(msg.speakerMemberId);
     }
   });

@@ -7,6 +7,7 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
 COPY public ./public
+COPY prompts ./prompts
 RUN npm run build
 
 FROM node:20-alpine AS runtime
@@ -18,6 +19,7 @@ RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
+COPY --from=build /app/prompts ./prompts
 
 EXPOSE 3000
 CMD ["node", "dist/server/index.js"]

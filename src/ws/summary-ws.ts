@@ -15,7 +15,13 @@ interface RoomStore {
 
 interface SummaryService {
   getFixedRubrics(roomId: string): { success: boolean; error?: string; data?: import("../models/types").FixedRubrics };
-  getNextSummaryChunk(roomId: string): { success: boolean; error?: string; data?: { chunk: string; isDone: boolean } };
+  startSummaryStream(
+    roomId: string,
+    callbacks: {
+      onChunk: (chunk: string) => void;
+      onDone: (fullText: string) => void;
+    }
+  ): Promise<void>;
 }
 
 let userSessionStore: UserSessionStore | null = null;
@@ -124,44 +130,48 @@ function sendFixedRubrics(uuid: string, roomId: string): void {
   });
 }
 
+/**
+ * Start real LLM summary streaming for a room.
+ * Uses cursor-based progression via the summary service.
+ * Prevents duplicate concurrent streams per room.
+ */
 function ensureSummaryStream(roomId: string): void {
   const service = summaryService;
   if (!service || streamingRooms.has(roomId)) return;
+
+  const room = roomStore?.getRoom(roomId);
+  if (!room || room.phase !== "summary") return;
+
+  // Check if already done
+  if (room.summary?.llmSummaryStatus === "done") {
+    // Re-emit to any late joiners — the full text is already stored
+    connectionManager.broadcastToRoomSummary(roomId, {
+      type: "summary_done",
+      data: { fullText: room.summary.llmSummaryText },
+    });
+    return;
+  }
+
   streamingRooms.add(roomId);
 
-  const tick = () => {
-    const room = roomStore?.getRoom(roomId);
-    if (!room || room.phase !== "summary") {
-      streamingRooms.delete(roomId);
-      return;
-    }
-
-    const result = service.getNextSummaryChunk(roomId);
-    if (!result.success || !result.data) {
-      streamingRooms.delete(roomId);
-      return;
-    }
-
-    if (result.data.chunk) {
+  service.startSummaryStream(roomId, {
+    onChunk: (chunk: string) => {
       connectionManager.broadcastToRoomSummary(roomId, {
         type: "summary_stream",
-        data: { chunk: result.data.chunk },
+        data: { chunk },
       });
-    }
-
-    if (result.data.isDone) {
+    },
+    onDone: (fullText: string) => {
       connectionManager.broadcastToRoomSummary(roomId, {
         type: "summary_done",
-        data: { fullText: room.summary?.llmSummaryText || "" },
+        data: { fullText },
       });
       streamingRooms.delete(roomId);
-      return;
-    }
-
-    setTimeout(tick, 120);
-  };
-
-  tick();
+    },
+  }).catch((err) => {
+    console.error(`[summary-ws] Summary stream error for room ${roomId}:`, err);
+    streamingRooms.delete(roomId);
+  });
 }
 
 function checkAndScheduleRoomCleanup(roomId: string): void {

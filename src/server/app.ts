@@ -4,6 +4,7 @@ import path from "path";
 import http from "http";
 import * as websocketServer from "./websocket-server";
 import type { Room } from "../models/types";
+import { config } from "../config/index";
 
 const app = express();
 let httpServer: http.Server | null = null;
@@ -50,6 +51,14 @@ export function createApp(stores: Stores, services: Services): { app: express.Ap
 
   app.get("/health", (_req, res) => {
     res.json({ success: true, msg: "Server is running", data: { timestamp: Date.now() } });
+  });
+
+  // Provide frontend with external service URLs so it can construct WHIP/WHEP endpoints
+  app.get("/api/config", (_req, res) => {
+    apiResponse(res, true, "Config fetched", {
+      mediamtxBaseUrl: config.mediamtxBaseUrl,
+      whisperBaseUrl: config.whisperBaseUrl,
+    });
   });
 
   app.post("/api/setup", (_req, res) => {

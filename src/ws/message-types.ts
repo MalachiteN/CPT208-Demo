@@ -47,6 +47,7 @@ export interface ChatMessage {
 export interface DiscussionState {
   currentRound: number;
   currentSpeakerMemberId: string | null;
+  currentSpeakerActive: boolean;
   roundSpokenMemberIds: string[];
   leaderMemberId: string | null;
   lastSpeakerMemberId: string | null;
@@ -59,16 +60,7 @@ export interface DiscussionState {
   messages: ChatMessage[];
 }
 
-export interface SummaryState {
-  fixedRubrics: {
-    everyoneSpoke: boolean | null;
-    hasValidInterruption: boolean;
-    leaderSameAsLastSpeaker: boolean | null;
-    leaderMemberId: string | null;
-  };
-  llmSummaryStatus: "idle" | "streaming" | "done";
-  llmSummaryText: string;
-}
+export { SummaryState } from "../models/types";
 
 // ============================================================================
 // Client -> Server Messages
@@ -191,6 +183,7 @@ export interface DiscussionStateMessage {
     phase: "discuss";
     currentRound: number;
     currentSpeakerMemberId: string | null;
+    currentSpeakerActive: boolean;
     roundSpokenMemberIds: string[];
     leaderMemberId: string | null;
     lastSpeakerMemberId: string | null;

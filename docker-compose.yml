@@ -5,21 +5,40 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
+    env_file:
+      - .env
     environment:
       NODE_ENV: production
       PORT: 3000
+      WHISPER_BASEURL: http://whisper:8080
+      MEDIAMTX_BASEURL: http://mediamtx:8888
     depends_on:
       - whisper
       - mediamtx
 
   whisper:
     image: ghcr.io/ggerganov/whisper.cpp:main-cuda
-    command: ["./server", "--host", "0.0.0.0", "--port", "8080", "-m", "/app/models/ggml-large-v3-turbo-q5_0.bin"]
+    entrypoint: ["./server"]
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "-m"
+      - "/app/models/ggml-large-v3-turbo-q5_0.bin"
+      - "--convert"
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
       - ./models:/app/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   mediamtx:
     image: bluenviron/mediamtx:latest

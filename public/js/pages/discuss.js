@@ -22,7 +22,13 @@
   let myMemberId = null;
   let isOwner = false;
   let isSpeaking = false;
+  let currentSpeakerActive = false;
   let botDrafts = new Map();
+
+  // Audio state
+  let whipCleanup = null;   // cleanup function for WHIP publish connection
+  let whepCleanup = null;   // cleanup function for WHEP subscribe connection
+  let remoteAudioElement = null; // <audio> element for remote playback
 
   function recoverToCurrentPhase(result, fallbackMessage) {
     if (!result?.data) {
@@ -168,14 +174,21 @@
       updateDiscussionState(message.data, message.data?.members || []);
     });
     ws.on('speaker_started', (message) => {
+      currentSpeakerActive = true;
       updateCurrentSpeaker(message.data.displayName, true);
       if (message.data.memberId === myMemberId) {
         isSpeaking = true;
+      } else if (message.data.mediaPath) {
+        // Subscribe to the speaker's audio via WHEP
+        subscribeToSpeaker(message.data.mediaPath);
       }
       updateButtonStates();
     });
     ws.on('speaker_stopped', (message) => {
+      currentSpeakerActive = false;
       if (message.data.memberId === myMemberId) isSpeaking = false;
+      // Unsubscribe from audio when speaker stops
+      unsubscribeFromSpeaker();
       updateButtonStates();
     });
     ws.on('message_created', (message) => {
@@ -192,6 +205,8 @@
     ws.on('bot_stream', (message) => handleBotStream(message.data));
     ws.on('bot_done', (message) => handleBotDone(message.data));
     ws.on('discussion_ended', () => {
+      // Clean up any active audio connections
+      cleanupAllAudio();
       Storage.setPhase('summary');
       ws.close();
       UI.navigate('/summary');
@@ -203,6 +218,7 @@
 
   function updateDiscussionState(state, members) {
     discussionState = { ...state, members, messages: state?.messages || [] };
+    currentSpeakerActive = Boolean(state?.currentSpeakerActive);
     roundBadge.textContent = `Round ${state.currentRound || 1}`;
     const currentSpeaker = members.find((member) => member.memberId === state.currentSpeakerMemberId) || null;
     updateCurrentSpeaker(currentSpeaker ? currentSpeaker.displayName : 'Unclaimed', Boolean(currentSpeaker));
@@ -224,26 +240,128 @@
     const hasSpokenThisRound = (discussionState.roundSpokenMemberIds || []).includes(myMemberId);
     const amICurrentSpeaker = currentSpeakerId === myMemberId;
     const firstSpeakerClaimOpen = currentSpeakerId === null && myMember?.kind === 'human';
-    const anotherSpeakerActive = Boolean(currentSpeakerId) && currentSpeakerId !== myMemberId;
+    const anotherSpeakerActive = Boolean(currentSpeakerId) && currentSpeakerId !== myMemberId && currentSpeakerActive;
     const amHuman = myMember?.kind === 'human';
 
     speechBtn.disabled = !(amICurrentSpeaker || firstSpeakerClaimOpen);
     speechBtn.textContent = isSpeaking ? 'End Speaking' : (firstSpeakerClaimOpen ? 'Claim First Turn' : 'Start Speaking');
     interruptBtn.disabled = !(anotherSpeakerActive && amHuman && !hasSpokenThisRound);
-    hintBtn.disabled = !(amICurrentSpeaker && !isSpeaking);
+    hintBtn.disabled = !(amICurrentSpeaker && !currentSpeakerActive);
   }
 
-  function handleSpeechToggle() {
+  /**
+   * Handle Start Speaking / End Speaking toggle.
+   *
+   * Start Speaking:
+   *   1. Request microphone via getUserMedia
+   *   2. Create WHIP connection to mediamtx
+   *   3. Send start_speaking with real mediaPath
+   *
+   * End Speaking:
+   *   1. Close WHIP connection and stop mic track
+   *   2. Send stop_speaking (after showing next-speaker modal)
+   */
+  async function handleSpeechToggle() {
     if (!discussionState || !ws) return;
     if (!isSpeaking) {
       const canStart = discussionState.currentSpeakerMemberId === myMemberId || discussionState.currentSpeakerMemberId === null;
-      if (!canStart) {
-        return;
+      if (!canStart) return;
+
+      const roomId = Storage.getRoomId();
+      const mediaPath = `room/${roomId}/${myMemberId}`;
+
+      try {
+        const whipResult = await Media.startWhip(roomId, myMemberId);
+        whipCleanup = whipResult.cleanup;
+        isSpeaking = true;
+        ws.send({ type: 'start_speaking', data: { mediaPath } });
+        updateButtonStates();
+      } catch (err) {
+        console.error('[discuss] WHIP connection failed:', err);
+        addSystemMessage('Failed to start audio. Please check microphone permissions.');
+        isSpeaking = false;
+        updateButtonStates();
       }
-      ws.send({ type: 'start_speaking', data: { mediaPath: '/future/path' } });
       return;
     }
+    // End speaking — show next-speaker modal
     showNextSpeakerModal();
+  }
+
+  /**
+   * Clean up WHIP (publish) connection.
+   */
+  function cleanupWhip() {
+    if (whipCleanup) {
+      try { whipCleanup(); } catch (_) {}
+      whipCleanup = null;
+    }
+  }
+
+  /**
+   * Clean up WHEP (subscribe) connection and audio element.
+   */
+  function cleanupWhep() {
+    if (whepCleanup) {
+      try { whepCleanup(); } catch (_) {}
+      whepCleanup = null;
+    }
+    if (remoteAudioElement) {
+      remoteAudioElement.pause();
+      remoteAudioElement.srcObject = null;
+      remoteAudioElement.remove();
+      remoteAudioElement = null;
+    }
+  }
+
+  /**
+   * Clean up all active audio connections.
+   */
+  function cleanupAllAudio() {
+    cleanupWhip();
+    cleanupWhep();
+  }
+
+  /**
+   * Subscribe to a speaker's audio via WHEP.
+   * Ensures only one active playback at a time.
+   *
+   * @param {string} mediaPath - e.g. "room/{roomId}/{memberId}"
+   */
+  async function subscribeToSpeaker(mediaPath) {
+    // Clean up any prior WHEP connection first
+    cleanupWhep();
+
+    // Parse roomId and memberId from mediaPath
+    const parts = mediaPath.split('/');
+    if (parts.length < 3) {
+      console.warn('[discuss] Invalid mediaPath:', mediaPath);
+      return;
+    }
+    const roomId = parts[1];
+    const memberId = parts[2];
+
+    // Create a hidden audio element
+    remoteAudioElement = document.createElement('audio');
+    remoteAudioElement.autoplay = true;
+    remoteAudioElement.style.display = 'none';
+    document.body.appendChild(remoteAudioElement);
+
+    try {
+      const whepResult = await Media.startWhep(roomId, memberId, remoteAudioElement);
+      whepCleanup = whepResult.cleanup;
+    } catch (err) {
+      console.error('[discuss] WHEP connection failed:', err);
+      cleanupWhep();
+      addSystemMessage('Failed to connect to speaker audio.');
+    }
+  }
+
+  /**
+   * Unsubscribe from current speaker's audio.
+   */
+  function unsubscribeFromSpeaker() {
+    cleanupWhep();
   }
 
   function showNextSpeakerModal() {
@@ -263,6 +381,8 @@
     option.className = 'speaker-option';
     option.textContent = member.displayName + (member.isOwner ? ' (Owner)' : '');
     option.addEventListener('click', () => {
+      // Close WHIP and stop mic before sending stop_speaking
+      cleanupWhip();
       ws.send({ type: 'stop_speaking', data: { nextSpeakerMemberId: member.memberId } });
       UI.setVisible(nextSpeakerModal, false);
       isSpeaking = false;
@@ -291,6 +411,8 @@
 
   async function handleEndDiscussion() {
     UI.setVisible(endConfirmModal, false);
+    // Clean up audio before ending
+    cleanupAllAudio();
     const result = await Api.endDiscussion(Storage.getUuid(), Storage.getRoomId());
     if (!result.success) {
       UI.showMessage(result.msg || 'Failed to end discussion', 'error');
@@ -370,7 +492,10 @@
     addChatMessage({ type: 'system', text, createdAt: Date.now(), speakerDisplayName: 'System' });
   }
 
-  window.addEventListener('beforeunload', () => ws && ws.close());
+  window.addEventListener('beforeunload', () => {
+    cleanupAllAudio();
+    if (ws) ws.close();
+  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

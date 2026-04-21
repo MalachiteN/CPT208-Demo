@@ -66,6 +66,7 @@ export interface PendingInterruption {
 export interface DiscussionState {
   currentRound: number;
   currentSpeakerMemberId: string | null;
+  currentSpeakerActive: boolean;
   roundSpokenMemberIds: string[];
   leaderMemberId: string | null;
   lastSpeakerMemberId: string | null;
@@ -124,8 +125,9 @@ export interface ApiResponse<T = unknown> {
 export interface BotStreamContext {
   roomId: string;
   memberId: string;
-  abortController?: AbortController;
+  abortController: AbortController;
   isStreaming: boolean;
+  accumulatedText: string;
 }
 
 // ============================================================================

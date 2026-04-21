@@ -1,6 +1,9 @@
 import { Room, SummaryState } from "../models/types";
 import { RoomStore } from "../stores/room-store";
 import { ServiceResult } from "../models/types";
+import { PromptService } from "./prompt-service";
+import { DiscussionPromptBuilder } from "./discussion-prompt-builder";
+import { LlmService, StreamCallbacks } from "./llm-service";
 
 function computeSummaryState(room: Room): SummaryState {
   const discussion = room.discussion;
@@ -18,9 +21,10 @@ function computeSummaryState(room: Room): SummaryState {
     };
   }
 
+  // Include both speech and bot_final messages as substantive turns
   const spokenMemberIds = new Set(
     discussion.messages
-      .filter((message) => message.type === "speech" && message.speakerMemberId)
+      .filter((message) => (message.type === "speech" || message.type === "bot_final") && message.speakerMemberId)
       .map((message) => message.speakerMemberId as string)
   );
 
@@ -43,21 +47,6 @@ function computeSummaryState(room: Room): SummaryState {
   };
 }
 
-// Mock summary text chunks for streaming simulation
-const MOCK_SUMMARY_CHUNKS = [
-  "This was an interesting discussion. ",
-  "The participants showed good engagement. ",
-  "Key points were raised about the topic. ",
-  "There was evidence of collaborative thinking. ",
-  "The discussion flowed naturally with some interruptions. ",
-  "Overall, this represents a typical group discussion scenario.",
-];
-
-export interface StreamChunkResult {
-  chunk: string;
-  isDone: boolean;
-}
-
 export function initializeSummary(roomId: string): ServiceResult<Room> {
   const room = RoomStore.getRoom(roomId);
   if (!room) {
@@ -72,55 +61,6 @@ export function initializeSummary(roomId: string): ServiceResult<Room> {
   RoomStore.updateRoom(room);
 
   return { success: true, data: room };
-}
-
-export function getNextSummaryChunk(roomId: string): ServiceResult<StreamChunkResult> {
-  const room = RoomStore.getRoom(roomId);
-  if (!room) {
-    return { success: false, error: "Room not found" };
-  }
-
-  if (room.phase !== "summary") {
-    return { success: false, error: "Room is not in summary phase" };
-  }
-
-  const summary = room.summary!;
-  if (summary.llmSummaryStatus === "done") {
-    return {
-      success: true,
-      data: { chunk: "", isDone: true },
-    };
-  }
-
-  if (summary.llmSummaryStatus === "idle") {
-    summary.llmSummaryStatus = "streaming";
-  }
-
-  const chunkIndex = summary.llmSummaryCursor;
-
-  if (chunkIndex >= MOCK_SUMMARY_CHUNKS.length) {
-    summary.llmSummaryStatus = "done";
-    RoomStore.updateRoom(room);
-    return {
-      success: true,
-      data: { chunk: "", isDone: true },
-    };
-  }
-
-  const chunk = MOCK_SUMMARY_CHUNKS[chunkIndex];
-  summary.llmSummaryText += chunk;
-  summary.llmSummaryCursor += 1;
-
-  if (summary.llmSummaryCursor >= MOCK_SUMMARY_CHUNKS.length) {
-    summary.llmSummaryStatus = "done";
-  }
-
-  RoomStore.updateRoom(room);
-
-  return {
-    success: true,
-    data: { chunk, isDone: summary.llmSummaryStatus === "done" },
-  };
 }
 
 export function getFixedRubrics(roomId: string): ServiceResult<SummaryState["fixedRubrics"]> {
@@ -144,10 +84,105 @@ export function getFixedRubrics(roomId: string): ServiceResult<SummaryState["fix
   };
 }
 
+/**
+ * Start the real LLM summary evaluation stream.
+ *
+ * Uses SUMMARY_MODEL with the summary system prompt and shared discussion
+ * history template. Streams chunks via callbacks.onChunk, and calls
+ * callbacks.onDone when finished (or on failure with fallback text).
+ *
+ * Tracks explicit cursor-based progression via llmSummaryCursor.
+ * On failure, provides fallback summary text and still emits completion.
+ * Prevents duplicate concurrent streams by checking llmSummaryStatus.
+ */
+export async function startSummaryStream(
+  roomId: string,
+  callbacks: {
+    onChunk: (chunk: string) => void;
+    onDone: (fullText: string) => void;
+  }
+): Promise<void> {
+  const room = RoomStore.getRoom(roomId);
+  if (!room) {
+    callbacks.onDone("[Could not generate evaluation: room not found]");
+    return;
+  }
+
+  if (room.phase !== "summary") {
+    callbacks.onDone("[Could not generate evaluation: not in summary phase]");
+    return;
+  }
+
+  // Ensure summary state exists
+  if (!room.summary) {
+    room.summary = computeSummaryState(room);
+  }
+
+  // Prevent duplicate concurrent streams
+  if (room.summary.llmSummaryStatus === "streaming") {
+    console.log(`[summary-service] Stream already active for room ${roomId}, skipping`);
+    return;
+  }
+
+  if (room.summary.llmSummaryStatus === "done") {
+    // Already done — emit the existing text
+    callbacks.onDone(room.summary.llmSummaryText);
+    return;
+  }
+
+  // Mark as streaming
+  room.summary.llmSummaryStatus = "streaming";
+  room.summary.llmSummaryCursor = 0;
+  RoomStore.updateRoom(room);
+
+  // Build prompts
+  const systemPrompt = PromptService.getSummaryPrompt();
+  const userPrompt = DiscussionPromptBuilder.buildSummaryUserPrompt({
+    messages: room.discussion?.messages || [],
+  });
+
+  const fallbackText = "[Could not generate evaluation]";
+
+  const streamCallbacks: StreamCallbacks = {
+    onChunk: (chunk: string) => {
+      const rm = RoomStore.getRoom(roomId);
+      if (!rm || !rm.summary) return;
+      rm.summary.llmSummaryText += chunk;
+      rm.summary.llmSummaryCursor += chunk.length;
+      RoomStore.updateRoom(rm);
+      callbacks.onChunk(chunk);
+    },
+    onDone: (fullText: string, wasFallback: boolean) => {
+      const rm = RoomStore.getRoom(roomId);
+      if (rm && rm.summary) {
+        rm.summary.llmSummaryText = wasFallback ? fallbackText : fullText;
+        rm.summary.llmSummaryStatus = "done";
+        rm.summary.llmSummaryCursor = rm.summary.llmSummaryText.length;
+        RoomStore.updateRoom(rm);
+      }
+      callbacks.onDone(wasFallback ? fallbackText : fullText);
+    },
+  };
+
+  try {
+    await LlmService.streamSummaryCompletion(systemPrompt, userPrompt, streamCallbacks);
+  } catch (err) {
+    console.error("[summary-service] streamSummaryStream error:", err);
+    const rm = RoomStore.getRoom(roomId);
+    if (rm && rm.summary) {
+      rm.summary.llmSummaryText = fallbackText;
+      rm.summary.llmSummaryStatus = "done";
+      rm.summary.llmSummaryCursor = fallbackText.length;
+      RoomStore.updateRoom(rm);
+    }
+    callbacks.onDone(fallbackText);
+  }
+}
+
 export const SummaryService = {
   initializeSummary,
-  getNextSummaryChunk,
   getFixedRubrics,
+  startSummaryStream,
 };
 
 export default SummaryService;

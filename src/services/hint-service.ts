@@ -1,27 +1,50 @@
-import { ServiceResult } from "../models/types";
+import type { Room } from "../models/types";
+import { DiscussionService } from "./discussion-service";
+import { PromptService } from "./prompt-service";
+import { DiscussionPromptBuilder } from "./discussion-prompt-builder";
+import { LlmService } from "./llm-service";
 
-// Mock hint responses
-const MOCK_HINTS = [
-  "You may begin by stating your view clearly and concisely.",
-  "Consider addressing the previous speaker's point before sharing your own.",
-  "Try to build upon what others have said to show active listening.",
-  "You could start by asking a thought-provoking question to the group.",
-  "Think about providing a concrete example to support your argument.",
-  "Acknowledge different perspectives before presenting your stance.",
-  "Consider summarizing the key points discussed so far.",
-  "You might want to suggest a direction for the discussion to move forward.",
-];
+const FALLBACK_HINT = "You may begin by clearly stating your main opinion.";
 
-export function getHint(): ServiceResult<string> {
-  const hintIndex = Math.floor(Math.random() * MOCK_HINTS.length);
-  return {
-    success: true,
-    data: MOCK_HINTS[hintIndex],
-  };
+/**
+ * Generate a real AI hint for the given room member.
+ *
+ * Validates via discussion-service canRequestHint (only the assigned
+ * current speaker who has not yet started speaking may request a hint).
+ * Assembles the hint prompt with shared discussion history, then calls
+ * the LLM with HINT_MODEL in non-streaming mode.
+ *
+ * Returns the hint text, or a fallback string on validation failure or
+ * LLM error.
+ */
+export async function generateHint(room: Room, memberId: string): Promise<string> {
+  // Validate via discussion-service
+  const canHint = DiscussionService.canRequestHint(room.roomId, memberId);
+  if (!canHint.success) {
+    return FALLBACK_HINT;
+  }
+
+  // Find the requesting member
+  const member = room.members.find((m) => m.memberId === memberId);
+  if (!member) {
+    return FALLBACK_HINT;
+  }
+
+  // Assemble prompt
+  const systemPrompt = PromptService.getHintPrompt();
+  const messages = room.discussion?.messages ?? [];
+  const userPrompt = DiscussionPromptBuilder.buildHintUserPrompt({
+    messages,
+    userDisplayName: member.displayName,
+  });
+
+  // Call LLM (non-streaming)
+  const result = await LlmService.completeHintCompletion(systemPrompt, userPrompt);
+  return result.text;
 }
 
 export const HintService = {
-  getHint,
+  generateHint,
 };
 
 export default HintService;
