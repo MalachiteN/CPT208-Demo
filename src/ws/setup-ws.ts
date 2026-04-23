@@ -48,6 +48,8 @@ export function handleConnection(socket: WebSocket, queryParams: { uuid?: string
     return;
   }
 
+  console.log(`[setup-ws] 用户进入lobby/create界面: uuid=${uuid}, roomId=${roomId}, memberId=${member.memberId}, displayName=${member.displayName}, isOwner=${member.isOwner}`);
+
   const metadata: ConnectionMetadata = {
     uuid,
     roomId,

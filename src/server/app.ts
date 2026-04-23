@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import path from "path";
 import http from "http";
 import * as websocketServer from "./websocket-server";
+import { createMediaProxyRouter } from "../routes/media-proxy";
 import type { Room } from "../models/types";
 import { config } from "../config/index";
 
@@ -56,7 +57,10 @@ export function createApp(stores: Stores, services: Services): { app: express.Ap
   // Provide frontend with external service URLs so it can construct WHIP/WHEP endpoints
   app.get("/api/config", (_req, res) => {
     apiResponse(res, true, "Config fetched", {
-      mediamtxBaseUrl: config.mediamtxBaseUrl,
+      mediamtxWebRtcUrl: config.mediamtxWebRtcUrl,
+      mediamtxApiUrl: config.mediamtxApiUrl,
+      mediamtxRtspHost: config.mediamtxRtspHost,
+      mediamtxRtspPort: config.mediamtxRtspPort,
       whisperBaseUrl: config.whisperBaseUrl,
     });
   });
@@ -64,6 +68,7 @@ export function createApp(stores: Stores, services: Services): { app: express.Ap
   app.post("/api/setup", (_req, res) => {
     const session = { uuid: services.idService.generateUuid(), createdAt: Date.now() };
     stores.userSessionStore.createSession(session);
+    console.log("[setup] 用户ID被创建: uuid=" + session.uuid);
     apiResponse(res, true, "UUID created", { uuid: session.uuid });
   });
 
@@ -146,6 +151,7 @@ export function createApp(stores: Stores, services: Services): { app: express.Ap
     if (!endResult.success || !endResult.data) return apiResponse(res, false, endResult.error || "Failed to end discussion", {}, 400);
 
     services.summaryService.initializeSummary(roomId);
+    console.log("[room] 讨论结束，所有人进入总结室: roomId=" + roomId);
     websocketServer.discussWs.broadcastDiscussionEnded(roomId, uuid);
     apiResponse(res, true, "Discussion ended", { roomId, phase: "summary" });
   });
@@ -167,6 +173,9 @@ export function createApp(stores: Stores, services: Services): { app: express.Ap
       summary: result.data.summary || null,
     });
   });
+
+  // Media proxy: WHIP/WHEP requests through same-origin to avoid CORS
+  app.use("/api", createMediaProxyRouter());
 
   app.get("/setup", (_req, res) => res.sendFile(path.join(publicPath, "setup.html")));
   app.get("/create", (_req, res) => res.sendFile(path.join(publicPath, "create.html")));

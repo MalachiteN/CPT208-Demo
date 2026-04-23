@@ -186,8 +186,10 @@
     });
     ws.on('speaker_stopped', (message) => {
       currentSpeakerActive = false;
-      if (message.data.memberId === myMemberId) isSpeaking = false;
-      // Unsubscribe from audio when speaker stops
+      if (message.data.memberId === myMemberId) {
+        isSpeaking = false;
+        cleanupWhip(); // Close WHIP after server has collected audio
+      }
       unsubscribeFromSpeaker();
       updateButtonStates();
     });
@@ -270,17 +272,26 @@
       const roomId = Storage.getRoomId();
       const mediaPath = `room/${roomId}/${myMemberId}`;
 
+      // Step 1: Establish WHIP audio connection first
+      let whipOk = false;
       try {
         const whipResult = await Media.startWhip(roomId, myMemberId);
         whipCleanup = whipResult.cleanup;
-        isSpeaking = true;
-        ws.send({ type: 'start_speaking', data: { mediaPath } });
-        updateButtonStates();
+        whipOk = true;
       } catch (err) {
         console.error('[discuss] WHIP connection failed:', err);
-        addSystemMessage('Failed to start audio. Please check microphone permissions.');
-        isSpeaking = false;
-        updateButtonStates();
+      }
+
+      // Step 2: Claim the turn — send mediaPath only if WHIP succeeded
+      isSpeaking = true;
+      ws.send({
+        type: 'start_speaking',
+        data: { mediaPath: whipOk ? mediaPath : undefined }
+      });
+      updateButtonStates();
+
+      if (!whipOk) {
+        addSystemMessage('Audio capture failed: could not connect to media server. Turn claimed without audio.');
       }
       return;
     }
@@ -347,14 +358,24 @@
     remoteAudioElement.style.display = 'none';
     document.body.appendChild(remoteAudioElement);
 
-    try {
-      const whepResult = await Media.startWhep(roomId, memberId, remoteAudioElement);
-      whepCleanup = whepResult.cleanup;
-    } catch (err) {
-      console.error('[discuss] WHEP connection failed:', err);
-      cleanupWhep();
-      addSystemMessage('Failed to connect to speaker audio.');
+    // Retry WHEP up to 3 times (stream may not be immediately available after WHIP)
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const whepResult = await Media.startWhep(roomId, memberId, remoteAudioElement);
+        whepCleanup = whepResult.cleanup;
+        return; // success
+      } catch (err) {
+        console.warn(`[discuss] WHEP attempt ${attempt}/${maxRetries} failed:`, err);
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
     }
+
+    // All retries failed
+    cleanupWhep();
+    addSystemMessage('Failed to connect to speaker audio.');
   }
 
   /**
@@ -381,11 +402,11 @@
     option.className = 'speaker-option';
     option.textContent = member.displayName + (member.isOwner ? ' (Owner)' : '');
     option.addEventListener('click', () => {
-      // Close WHIP and stop mic before sending stop_speaking
-      cleanupWhip();
+      // Send stop_speaking FIRST (server needs to collect audio before stream closes)
       ws.send({ type: 'stop_speaking', data: { nextSpeakerMemberId: member.memberId } });
       UI.setVisible(nextSpeakerModal, false);
       isSpeaking = false;
+      // WHIP cleanup will happen when server sends speaker_stopped
       updateButtonStates();
     });
     speakerOptions.appendChild(option);

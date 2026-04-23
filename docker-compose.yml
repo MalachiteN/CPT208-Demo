@@ -11,7 +11,12 @@ services:
       NODE_ENV: production
       PORT: 3000
       WHISPER_BASEURL: http://whisper:8080
-      MEDIAMTX_BASEURL: http://mediamtx:8888
+      MEDIAMTX_WEBRTC_URL: http://mediamtx:8889
+      MEDIAMTX_API_URL: http://mediamtx:8888
+      MEDIAMTX_RTSP_HOST: mediamtx
+      MEDIAMTX_RTSP_PORT: 8554
+    volumes:
+      - ./recordings:/recordings
     depends_on:
       - whisper
       - mediamtx
@@ -45,4 +50,10 @@ services:
     restart: unless-stopped
     ports:
       - "8554:8554"
-      - "8888:8888"
+      - "9888:8888"
+      - "8889:8889"
+      - "8189:8189/udp"
+    volumes:
+      - ./recordings:/recordings
+      - ./mediamtx.yml:/mediamtx.yml
+    command: /mediamtx.yml

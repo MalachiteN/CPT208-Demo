@@ -2,7 +2,8 @@ import { Room, ChatMessage } from "../models/types";
 import { RoomStore } from "../stores/room-store";
 import { IdService } from "./id-service";
 import { ServiceResult } from "../models/types";
-import { AudioCollectionService } from "./audio-collection-service";
+import * as fs from "fs";
+import { AudioFileService } from "./audio-file-service";
 import { WhisperService } from "./whisper-service";
 
 export interface StartSpeakingResult {
@@ -25,7 +26,8 @@ function isEligibleNextSpeaker(room: Room, nextSpeakerMemberId: string | null): 
 export function startSpeaking(
   roomId: string,
   memberId: string,
-  mediaPath?: string
+  mediaPath?: string,
+  callbacks?: { onRecordingStarted?: () => void }
 ): ServiceResult<StartSpeakingResult> {
   const room = RoomStore.getRoom(roomId);
   if (!room) {
@@ -59,20 +61,25 @@ export function startSpeaking(
     return { success: false, error: "Speaker is already actively speaking" };
   }
 
-  discussion.currentSpeakerActive = true;
+  if (isFirstSpeaker) {
+    console.log(`[discussion-service] 首个发言者主动claim: roomId=${roomId}, memberId=${memberId}, displayName=${member.displayName}, kind=${member.kind}, round=${discussion.currentRound}, isFirstSpeaker=${isFirstSpeaker}`);
+  } else {
+    console.log(`[discussion-service] 发言者准备发言（被指派）: roomId=${roomId}, memberId=${memberId}, displayName=${member.displayName}, kind=${member.kind}, round=${discussion.currentRound}, isFirstSpeaker=${isFirstSpeaker}`);
+  }
 
-  // Start audio collection for human speakers
-  let resolvedMediaPath: string | undefined;
+  discussion.currentSpeakerActive = true;
+  console.log(`[discussion-service] 发言者实际开始发言: roomId=${roomId}, memberId=${memberId}, displayName=${member.displayName}, kind=${member.kind}, round=${discussion.currentRound}, isFirstSpeaker=${isFirstSpeaker}`);
+
+  // Log audio collection start for human speakers
   if (member.kind === "human") {
-    const collectionPath = mediaPath ?? `room/${roomId}/${memberId}`;
-    resolvedMediaPath = AudioCollectionService.startCollection(roomId, memberId, collectionPath);
+    AudioFileService.logCollectionStart(roomId, memberId);
   }
 
   RoomStore.updateRoom(room);
 
   return {
     success: true,
-    data: { room, isFirstSpeaker, mediaPath: resolvedMediaPath },
+    data: { room, isFirstSpeaker },
   };
 }
 
@@ -160,6 +167,9 @@ export function stopSpeaking(
   discussion.currentSpeakerMemberId = nextSpeakerMemberId;
   discussion.pendingInterruption = null;
 
+  const logRound = discussion.currentRound - (roundCompleted ? 1 : 0);
+  console.log(`[discussion-service] 发言结束并指派下一个: roomId=${roomId}, memberId=${memberId}, displayName=${member.displayName}, kind=${member.kind}, nextSpeakerMemberId=${nextSpeakerMemberId}, round=${logRound}, roundCompleted=${roundCompleted}, interrupted=${interrupted}`);
+
   RoomStore.updateRoom(room);
 
   return {
@@ -199,11 +209,17 @@ export async function stopSpeakingAndTranscribe(
 
   const { room, message, roundCompleted } = result.data;
 
-  // Stop audio collection and get the file
-  const { filePath } = await AudioCollectionService.stopCollection(roomId, memberId);
+  // Get the latest recording file
+  const recording = AudioFileService.getLatestRecording(roomId, memberId);
+  if (!recording) {
+    return result;
+  }
+  const filePath = recording.filePath;
+  const fileSize = fs.statSync(filePath).size;
+  AudioFileService.logCollectionEnd(roomId, memberId, filePath, fileSize);
 
   // Transcribe with whisper
-  const transcriptResult = await WhisperService.transcribeAndCleanup(filePath);
+  const transcriptResult = await WhisperService.transcribe(filePath);
 
   // Finalize the message with the transcript
   const finalizeResult = finalizeHumanTurnWithTranscript(roomId, message.messageId, transcriptResult.text);

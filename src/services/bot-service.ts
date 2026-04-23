@@ -63,6 +63,8 @@ export function startBotTurn(
     botPersona,
   });
 
+  console.log(`[bot-service] Bot准备发言并开始流式生成: roomId=${room.roomId}, botMemberId=${botMember.memberId}, botName=${botMember.displayName}`);
+
   // Fire-and-forget async stream — onDone is called inside the callbacks
   LlmService.streamRoleplayCompletion(
     systemPrompt,

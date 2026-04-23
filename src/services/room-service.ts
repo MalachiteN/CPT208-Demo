@@ -41,6 +41,7 @@ export function createRoom(uuid: string): ServiceResult<CreateRoomResult> {
   };
 
   RoomStore.createRoom(room);
+  console.log("[room] 房间被创建: roomId=" + roomId + ", ownerUuid=" + uuid + ", ownerMemberId=" + ownerMember.memberId);
 
   return {
     success: true,
@@ -81,6 +82,7 @@ export function joinRoom(uuid: string, roomId: string): ServiceResult<JoinRoomRe
 
   room.members.push(member);
   RoomStore.updateRoom(room);
+  console.log("[room] 用户加入了房间: roomId=" + roomId + ", uuid=" + uuid + ", memberId=" + member.memberId + ", displayName=" + member.displayName);
 
   return {
     success: true,
@@ -121,6 +123,7 @@ export function addBot(
 
   room.members.push(member);
   RoomStore.updateRoom(room);
+  console.log("[room] Bot加入了房间: roomId=" + roomId + ", botMemberId=" + member.memberId + ", botName=" + botName + ", persona=" + persona);
 
   return {
     success: true,

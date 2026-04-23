@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import type { Member, Room } from "../models/types";
+import type { Member, Room, ChatMessage } from "../models/types";
 import type { ConnectionMetadata, ServerMessage } from "./message-types";
 import {
   isAskHintMessage,
@@ -11,9 +11,9 @@ import {
   isStopSpeakingMessage,
 } from "./message-types";
 import * as connectionManager from "./connection-manager";
-import { AudioCollectionService } from "../services/audio-collection-service";
 import { MediaService } from "../services/media-service";
 import { BotService } from "../services/bot-service";
+import { IdService } from "../services/id-service";
 
 interface UserSessionStore {
   getSession(uuid: string): { uuid: string; createdAt: number } | undefined;
@@ -24,7 +24,7 @@ interface RoomStore {
 }
 
 interface DiscussionService {
-  startSpeaking(roomId: string, memberId: string, mediaPath?: string): { success: boolean; error?: string; data?: { room: Room; isFirstSpeaker?: boolean; mediaPath?: string } };
+  startSpeaking(roomId: string, memberId: string, mediaPath?: string, callbacks?: { onRecordingStarted?: () => void }): { success: boolean; error?: string; data?: { room: Room; isFirstSpeaker?: boolean; mediaPath?: string } };
   stopSpeaking(roomId: string, memberId: string, nextSpeakerMemberId: string | null, interrupted?: boolean, overrideText?: string): { success: boolean; error?: string; data?: { room: Room; message: import("../models/types").ChatMessage; roundCompleted: boolean } };
   stopSpeakingAndTranscribe(roomId: string, memberId: string, nextSpeakerMemberId: string | null, interrupted?: boolean): Promise<{ success: boolean; error?: string; data?: { room: Room; message: import("../models/types").ChatMessage; roundCompleted: boolean } }>;
   requestInterrupt(roomId: string, fromMemberId: string, targetSpeakerMemberId: string): { success: boolean; error?: string };
@@ -124,7 +124,8 @@ function handleMessage(socket: WebSocket, uuid: string, roomId: string, memberId
       return;
     }
     if (isStopSpeakingMessage(message)) {
-      handleStopSpeaking(uuid, roomId, memberId, message.data.nextSpeakerMemberId);
+      handleStopSpeaking(uuid, roomId, memberId, message.data.nextSpeakerMemberId)
+        .catch((err) => console.error(`[discuss-ws] handleStopSpeaking error:`, err));
       return;
     }
     if (isInterruptRequestMessage(message)) {
@@ -197,8 +198,28 @@ function broadcastDiscussionState(room: Room): void {
 function handleStartSpeaking(uuid: string, roomId: string, memberId: string, mediaPath?: string): void {
   if (!discussionService || !roomStore) return;
 
-  // Pass mediaPath to startSpeaking — it starts audio collection for humans
-  const result = discussionService.startSpeaking(roomId, memberId, mediaPath);
+  const roomBefore = roomStore.getRoom(roomId);
+  const memberBefore = roomBefore?.members.find((m) => m.memberId === memberId);
+
+  // Build a callback that notifies the speaker once audio collection is actually recording
+  const onRecordingStarted = memberBefore?.kind === "human" ? () => {
+    const systemMessage: ChatMessage = {
+      messageId: IdService.generateMessageId(),
+      type: "system",
+      speakerMemberId: null,
+      speakerDisplayName: "System",
+      text: "Voice transcription online. Please start talking.",
+      createdAt: Date.now(),
+      meta: { round: roomBefore?.discussion?.currentRound },
+    };
+    connectionManager.sendToDiscussUser(uuid, {
+      type: "message_created",
+      data: { message: systemMessage },
+    });
+  } : undefined;
+
+  // Pass mediaPath and callbacks to startSpeaking — it starts audio collection for humans
+  const result = discussionService.startSpeaking(roomId, memberId, mediaPath, onRecordingStarted ? { onRecordingStarted } : undefined);
   if (!result.success || !result.data) {
     connectionManager.sendToDiscussUser(uuid, { type: "error", data: { msg: result.error || "Cannot start speaking" } });
     return;
@@ -256,7 +277,14 @@ async function handleStopSpeaking(uuid: string, roomId: string, memberId: string
   connectionManager.broadcastToRoomDiscuss(roomId, { type: "speaker_stopped", data: { memberId } });
   connectionManager.broadcastToRoomDiscuss(roomId, { type: "message_created", data: { message } });
   broadcastDiscussionState(updatedRoom);
+  console.log(`[discuss-ws] 发言结束广播完成: roomId=${roomId}, memberId=${memberId}, nextSpeakerMemberId=${nextSpeakerMemberId}`);
 
+  if (nextSpeakerMemberId) {
+    const nextSpeaker = updatedRoom.members.find((m) => m.memberId === nextSpeakerMemberId);
+    if (nextSpeaker?.kind === "bot") {
+      console.log(`[discuss-ws] 下一位发言者为bot，触发bot发言: roomId=${updatedRoom.roomId}, nextSpeakerMemberId=${nextSpeakerMemberId}`);
+    }
+  }
   triggerAssignedBotTurn(updatedRoom, nextSpeakerMemberId);
 }
 
@@ -359,12 +387,6 @@ function handleInterruptResponse(uuid: string, roomId: string, memberId: string,
   });
 
   if (accepted) {
-    // Also stop audio collection for the interrupted human speaker
-    const interruptedMember = room.members.find((m) => m.memberId === toMemberId);
-    if (interruptedMember?.kind === "human") {
-      AudioCollectionService.cleanupCollection(roomId, toMemberId);
-    }
-
     connectionManager.broadcastToRoomDiscuss(roomId, { type: "speaker_stopped", data: { memberId: toMemberId } });
     if (interruptedMessage) {
       connectionManager.broadcastToRoomDiscuss(roomId, { type: "message_created", data: { message: interruptedMessage } });
@@ -467,6 +489,7 @@ function triggerAssignedBotTurn(room: Room, nextSpeakerMemberId: string | null):
 }
 
 export function broadcastDiscussionEnded(roomId: string, excludeUuid?: string): void {
+  console.log(`[discuss-ws] 讨论结束，广播进入总结室: roomId=${roomId}`);
   // Abort any active bot streams first to prevent orphaned LLM requests
   BotService.stopAllStreamsForRoom(roomId);
 
@@ -475,7 +498,7 @@ export function broadcastDiscussionEnded(roomId: string, excludeUuid?: string): 
   MediaService.cleanupRoomStreams(roomId).catch((err) => {
     console.warn(`[discuss-ws] Media cleanup failed for room ${roomId}:`, err);
   });
-  AudioCollectionService.cleanupRoomAudio(roomId);
+  console.log(`[discuss-ws] 讨论结束，媒体流清理完成: roomId=${roomId}`);
 
   connectionManager.broadcastToRoomDiscuss(
     roomId,

@@ -71,7 +71,7 @@ export async function transcribe(filePath: string): Promise<TranscriptionResult>
     const fileName = path.basename(filePath);
     const blob = new Blob([fileBuffer], { type: getMimeType(filePath) });
     formData.append("file", blob, fileName);
-    formData.append("language", "auto");
+    formData.append("language", "en");
 
     const response = await fetch(url, {
       method: "POST",
@@ -120,6 +120,13 @@ export async function transcribeAndCleanup(filePath: string): Promise<Transcript
 
 function getMimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
+  
+  // mediamtx records fMP4 container with Opus audio
+  // whisper.cpp with --convert can handle it as audio/opus
+  if (filePath.includes("/recordings/")) {
+    return "audio/opus";
+  }
+  
   switch (ext) {
     case ".opus":
       return "audio/opus";
@@ -130,7 +137,9 @@ function getMimeType(filePath: string): string {
     case ".ogg":
       return "audio/ogg";
     case ".m4a":
-      return "audio/mp4";
+    case ".mp4":
+      // fMP4 container with Opus audio (from mediamtx)
+      return "audio/opus";
     case ".flac":
       return "audio/flac";
     default:

@@ -1,0 +1,29 @@
+# 全局自动录制配置
+pathDefaults:
+  record: yes
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+
+# 允许所有路径（动态创建）
+paths:
+  "~^room/.*$":
+    source: publisher
+    record: yes
+    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+
+# WebRTC 配置 (WHIP/WHEP)
+webrtc: true
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+
+# RTSP 配置
+rtsp: true
+rtspAddress: :8554
+
+# HTTP API 配置
+api: true
+apiAddress: :8888
+
+# 禁用不需要的协议以避免端口冲突
+hls: false
+rtmp: false
+srt: false

@@ -77,13 +77,16 @@ export function handleConnection(socket: WebSocket, queryParams: { uuid?: string
     lastPingAt: Date.now(),
   };
   connectionManager.registerSummaryConnection(socket, metadata);
+  console.log(`[summary-ws] Summary连接建立: uuid=${uuid}, roomId=${roomId}, memberId=${member.memberId}, displayName=${member.displayName}`);
 
   socket.on("message", (data: Buffer) => handleMessage(socket, uuid, roomId, data));
   socket.on("close", () => {
+    console.log(`[summary-ws] Summary连接断开: uuid=${uuid}, roomId=${roomId}, memberId=${member.memberId}`);
     connectionManager.removeSummaryConnection(uuid);
     checkAndScheduleRoomCleanup(roomId);
   });
   socket.on("error", () => {
+    console.log(`[summary-ws] Summary连接错误断开: uuid=${uuid}, roomId=${roomId}, memberId=${member.memberId}`);
     connectionManager.removeSummaryConnection(uuid);
     checkAndScheduleRoomCleanup(roomId);
   });
@@ -186,6 +189,7 @@ function checkAndScheduleRoomCleanup(roomId: string): void {
       return;
     }
 
+    console.log(`[summary-ws] 总结室无存活连接，准备调度房间清理: roomId=${roomId}, aliveConnections=0`);
     scheduleRoomCleanup(roomId);
   }, STALE_RECHECK_DELAY_MS);
 }
@@ -195,6 +199,7 @@ function scheduleRoomCleanup(roomId: string): void {
     return;
   }
 
+  console.log(`[summary-ws] 所有用户退出总结室，准备销毁房间: roomId=${roomId}`);
   roomCleanupTimers.set(
     roomId,
     setTimeout(() => {
@@ -216,7 +221,9 @@ function scheduleRoomCleanup(roomId: string): void {
 
       setTimeout(() => {
         connectionManager.removeAllConnectionsForRoom(roomId);
+        console.log(`[summary-ws] 房间即将销毁: roomId=${roomId}`);
         roomStore?.deleteRoom(roomId);
+        console.log(`[summary-ws] 房间已销毁: roomId=${roomId}`);
       }, 200);
     }, CLEANUP_TIMEOUT_MS)
   );

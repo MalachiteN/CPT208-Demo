@@ -20,7 +20,15 @@ export const config = {
 
   // External service URLs (Stage 2)
   whisperBaseUrl: process.env.WHISPER_BASEURL || "http://localhost:8080",
-  mediamtxBaseUrl: process.env.MEDIAMTX_BASEURL || "http://localhost:8888",
+
+  // mediamtx — three separate concerns:
+  // WebRTC (WHIP/WHEP): port 8889
+  // RTSP (audio pull):  port 8554 (hostname only, used for rtsp:// URL)
+  // HTTP API (v3):      port 8888 (for path management / cleanup)
+  mediamtxWebRtcUrl: process.env.MEDIAMTX_WEBRTC_URL || "http://mediamtx:8889",
+  mediamtxRtspHost: process.env.MEDIAMTX_RTSP_HOST || "mediamtx",
+  mediamtxRtspPort: parseInt(process.env.MEDIAMTX_RTSP_PORT || "8554", 10),
+  mediamtxApiUrl: process.env.MEDIAMTX_API_URL || "http://mediamtx:8888",
 };
 
 export default config;

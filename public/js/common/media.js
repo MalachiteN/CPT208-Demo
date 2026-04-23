@@ -4,91 +4,43 @@
  * Provides WHIP (publish) and WHEP (subscribe) helpers for
  * real-time audio streaming via mediamtx.
  *
+ * Uses same-origin proxy routes on the app server to avoid CORS issues.
+ *
  * Dependencies: none (vanilla browser APIs)
  */
 
-let _mediamtxBaseUrl = null;
-
 /**
- * Resolve the mediamtx base URL.
- *
- * Strategy:
- * 1. Use cached value if already fetched.
- * 2. Use window.__MEDIAMTX_BASEURL if set by the backend (injected in HTML).
- * 3. Fetch from /api/config endpoint.
- * 4. Fall back to same host with port 8888.
- */
-async function resolveMediamtxBaseUrl() {
-  if (_mediamtxBaseUrl) return _mediamtxBaseUrl;
-
-  if (typeof window !== 'undefined' && window.__MEDIAMTX_BASEURL) {
-    _mediamtxBaseUrl = window.__MEDIAMTX_BASEURL.replace(/\/+$/, '');
-    return _mediamtxBaseUrl;
-  }
-
-  try {
-    const resp = await fetch('/api/config');
-    if (resp.ok) {
-      const json = await resp.json();
-      if (json.data?.mediamtxBaseUrl) {
-        // Backend URL is for Docker internal networking; browser needs the host URL.
-        // Extract the host-accessible URL: use page hostname with mediamtx port.
-        const loc = window.location;
-        _mediamtxBaseUrl = `${loc.protocol}//${loc.hostname}:8888`;
-        return _mediamtxBaseUrl;
-      }
-    }
-  } catch (_) {
-    // Fallback below
-  }
-
-  const loc = window.location;
-  _mediamtxBaseUrl = `${loc.protocol}//${loc.hostname}:8888`;
-  return _mediamtxBaseUrl;
-}
-
-/**
- * Get the mediamtx base URL synchronously (for URL building after resolution).
- */
-function getMediamtxBaseUrl() {
-  if (_mediamtxBaseUrl) return _mediamtxBaseUrl;
-  const loc = window.location;
-  return `${loc.protocol}//${loc.hostname}:8888`;
-}
-
-/**
- * Build WHIP endpoint URL for a given room/member.
+ * Build WHIP endpoint URL via same-origin proxy.
  * @param {string} roomId
  * @param {string} memberId
  * @returns {string}
  */
 function buildWhipUrl(roomId, memberId) {
-  return `${getMediamtxBaseUrl()}/room/${roomId}/${memberId}/whip`;
+  return `/api/whip/${roomId}/${memberId}`;
 }
 
 /**
- * Build WHEP endpoint URL for a given room/member.
+ * Build WHEP endpoint URL via same-origin proxy.
  * @param {string} roomId
  * @param {string} memberId
  * @returns {string}
  */
 function buildWhepUrl(roomId, memberId) {
-  return `${getMediamtxBaseUrl()}/room/${roomId}/${memberId}/whep`;
+  return `/api/whep/${roomId}/${memberId}`;
 }
 
 /**
  * Create a WHIP publishing connection.
  *
  * Requests microphone, creates RTCPeerConnection, negotiates with mediamtx,
- * and returns a cleanup function.
+ * and waits for the peer connection to be fully established (DTLS+RTP flowing)
+ * before returning.
  *
  * @param {string} roomId
  * @param {string} memberId
  * @returns {Promise<{ peerConnection: RTCPeerConnection, localStream: MediaStream, cleanup: Function }>}
  */
 async function startWhip(roomId, memberId) {
-  await resolveMediamtxBaseUrl();
-
   const localStream = await navigator.mediaDevices.getUserMedia({
     audio: true,
     video: false,
@@ -133,11 +85,56 @@ async function startWhip(roomId, memberId) {
     sdp: answerSdp,
   }));
 
+  // CRITICAL: wait for the peer connection to be fully established
+  // (DTLS connected, RTP flowing) before returning success
+  await waitForPeerConnection(pc);
+
   function cleanup() {
     cleanupWhip(pc, localStream);
   }
 
   return { peerConnection: pc, localStream, cleanup };
+}
+
+/**
+ * Wait for RTCPeerConnection to reach "connected" state.
+ * This ensures DTLS is established and media can flow.
+ * Times out after 10 seconds.
+ */
+function waitForPeerConnection(pc) {
+  return new Promise((resolve, reject) => {
+    if (pc.connectionState === 'connected' || pc.iceConnectionState === 'connected') {
+      resolve();
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      pc.removeEventListener('connectionstatechange', onStateChange);
+      pc.removeEventListener('iceconnectionstatechange', onIceChange);
+      reject(new Error('WebRTC peer connection timeout'));
+    }, 10000);
+
+    function onStateChange() {
+      if (pc.connectionState === 'connected') {
+        clearTimeout(timeout);
+        pc.removeEventListener('connectionstatechange', onStateChange);
+        pc.removeEventListener('iceconnectionstatechange', onIceChange);
+        resolve();
+      }
+    }
+
+    function onIceChange() {
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        clearTimeout(timeout);
+        pc.removeEventListener('connectionstatechange', onStateChange);
+        pc.removeEventListener('iceconnectionstatechange', onIceChange);
+        resolve();
+      }
+    }
+
+    pc.addEventListener('connectionstatechange', onStateChange);
+    pc.addEventListener('iceconnectionstatechange', onIceChange);
+  });
 }
 
 /**
@@ -152,8 +149,6 @@ async function startWhip(roomId, memberId) {
  * @returns {Promise<{ peerConnection: RTCPeerConnection, cleanup: Function }>}
  */
 async function startWhep(roomId, memberId, audioElement) {
-  await resolveMediamtxBaseUrl();
-
   const pc = new RTCPeerConnection({
     iceServers: [],
   });
@@ -267,8 +262,6 @@ function cleanupWhep(pc) {
 // ---------------------------------------------------------------------------
 
 window.Media = {
-  getMediamtxBaseUrl,
-  resolveMediamtxBaseUrl,
   buildWhipUrl,
   buildWhepUrl,
   startWhip,
