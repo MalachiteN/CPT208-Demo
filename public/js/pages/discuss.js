@@ -517,7 +517,7 @@
     if (!data?.memberId) return;
     const draft = ensureBotDraft(data.memberId);
     draft.text += data.chunk || '';
-    draft.element.textContent = draft.text;
+    draft.element.innerHTML = UI.renderMarkdown(draft.text);
     scrollMessagesToBottom();
   }
 
@@ -525,7 +525,7 @@
     if (!data?.memberId) return;
     const draft = ensureBotDraft(data.memberId);
     draft.text = data.fullText || draft.text;
-    draft.element.textContent = draft.text;
+    draft.element.innerHTML = UI.renderMarkdown(draft.text);
     draft.wrapper.dataset.botDone = 'true';
     scrollMessagesToBottom();
   }
@@ -543,7 +543,7 @@
     speaker.className = 'chat-speaker';
     speaker.textContent = member?.displayName || 'Bot';
     const text = document.createElement('div');
-    text.className = 'chat-text';
+    text.className = 'chat-text markdown-content';
     wrapper.appendChild(speaker);
     wrapper.appendChild(text);
     messageList.appendChild(wrapper);

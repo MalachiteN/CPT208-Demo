@@ -128,7 +128,8 @@
       updateFixedRubrics(roomData.summary.fixedRubrics);
       updateStats(roomData.discussion, roomData.members);
       summaryTextContent = roomData.summary.llmSummaryText || '';
-      summaryText.textContent = summaryTextContent;
+      summaryText.classList.add('markdown-content');
+      summaryText.innerHTML = UI.renderMarkdown(summaryTextContent);
     }
     return true;
   }
@@ -142,11 +143,11 @@
     ws.on('summary_stream', (message) => {
       if (!message.data?.chunk) return;
       summaryTextContent += message.data.chunk;
-      summaryText.textContent = summaryTextContent;
+      summaryText.innerHTML = UI.renderMarkdown(summaryTextContent);
     });
     ws.on('summary_done', (message) => {
       summaryTextContent = message.data?.fullText || summaryTextContent;
-      summaryText.textContent = summaryTextContent;
+      summaryText.innerHTML = UI.renderMarkdown(summaryTextContent);
     });
     ws.on('room_closed', () => {
       if (ws) ws.close();

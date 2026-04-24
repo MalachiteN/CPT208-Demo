@@ -151,6 +151,22 @@ const UI = {
   },
 
   /**
+   * Render Markdown text to sanitized HTML
+   * @param {string} text - Markdown text
+   * @returns {string} Sanitized HTML
+   */
+  renderMarkdown(text) {
+    if (!text) return '';
+    if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
+      const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return escaped.replace(/\n/g, '<br>');
+    }
+    marked.setOptions({ breaks: true, gfm: true });
+    const rawHtml = marked.parse(text);
+    return DOMPurify.sanitize(rawHtml);
+  },
+
+  /**
    * Get URL path
    * @returns {string}
    */
@@ -187,7 +203,17 @@ const UI = {
 
     const content = document.createElement('div');
     content.className = 'message-content';
-    content.textContent = message.text;
+    if (message.type === 'bot_final' || message.type === 'bot_stream') {
+      content.innerHTML = this.renderMarkdown(message.text);
+      content.classList.add('markdown-content');
+    } else if (message.type === 'system' && message.text && message.text.startsWith('AI Hint:')) {
+      const hintPrefix = 'AI Hint: ';
+      const hintText = message.text.slice(hintPrefix.length);
+      content.innerHTML = '<strong>AI Hint:</strong> ' + this.renderMarkdown(hintText);
+      content.classList.add('markdown-content');
+    } else {
+      content.textContent = message.text;
+    }
 
     if (message.meta?.interrupted) {
       const interruptedBadge = document.createElement('span');
