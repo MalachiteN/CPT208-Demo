@@ -90,6 +90,11 @@ export interface StartSpeakingMessage {
 
 export interface StopSpeakingMessage {
   type: "stop_speaking";
+  data: {};
+}
+
+export interface NextSpeakerMessage {
+  type: "next_speaker";
   data: {
     nextSpeakerMemberId: string;
   };
@@ -121,6 +126,7 @@ export type ClientMessage =
   | PingMessage
   | StartSpeakingMessage
   | StopSpeakingMessage
+  | NextSpeakerMessage
   | InterruptRequestMessage
   | InterruptResponseMessage
   | AskHintMessage;
@@ -343,6 +349,10 @@ export function isStartSpeakingMessage(msg: unknown): msg is StartSpeakingMessag
 
 export function isStopSpeakingMessage(msg: unknown): msg is StopSpeakingMessage {
   return typeof msg === "object" && msg !== null && (msg as Record<string, unknown>).type === "stop_speaking";
+}
+
+export function isNextSpeakerMessage(msg: unknown): msg is NextSpeakerMessage {
+  return typeof msg === "object" && msg !== null && (msg as Record<string, unknown>).type === "next_speaker";
 }
 
 export function isInterruptRequestMessage(msg: unknown): msg is InterruptRequestMessage {

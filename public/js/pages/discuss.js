@@ -23,6 +23,7 @@
   let isOwner = false;
   let isSpeaking = false;
   let currentSpeakerActive = false;
+  let awaitingNextSpeakerSelection = false;
   let botDrafts = new Map();
 
   // Audio state
@@ -185,7 +186,8 @@
       updateButtonStates();
     });
     ws.on('speaker_stopped', (message) => {
-      currentSpeakerActive = false;
+      // Note: currentSpeakerActive is driven by discussion_state updates from server
+      // The server keeps currentSpeakerActive = true after stop_speaking
       if (message.data.memberId === myMemberId) {
         isSpeaking = false;
         cleanupWhip(); // Close WHIP after server has collected audio
@@ -224,9 +226,26 @@
     roundBadge.textContent = `Round ${state.currentRound || 1}`;
     const currentSpeaker = members.find((member) => member.memberId === state.currentSpeakerMemberId) || null;
     updateCurrentSpeaker(currentSpeaker ? currentSpeaker.displayName : 'Unclaimed', Boolean(currentSpeaker));
+
+    // Reset awaitingNextSpeakerSelection if I'm no longer the current speaker
+    // (e.g., after selecting next speaker, or if someone else was assigned)
     if (!currentSpeaker || currentSpeaker.memberId !== myMemberId) {
       isSpeaking = false;
+      awaitingNextSpeakerSelection = false;
+    } else {
+      // I'm still the current speaker - check if I need to restore awaitingNextSpeakerSelection
+      // This happens when: server has currentSpeakerActive=true (I stopped speaking but haven't assigned next)
+      // and local isSpeaking=false
+      if (currentSpeakerActive && !isSpeaking && !awaitingNextSpeakerSelection) {
+        awaitingNextSpeakerSelection = true;
+      }
     }
+
+    // Auto-close next speaker modal if I'm no longer the current speaker
+    if (state.currentSpeakerMemberId !== myMemberId && !nextSpeakerModal.classList.contains('hidden')) {
+      UI.setVisible(nextSpeakerModal, false);
+    }
+
     updateButtonStates();
   }
 
@@ -245,14 +264,32 @@
     const anotherSpeakerActive = Boolean(currentSpeakerId) && currentSpeakerId !== myMemberId && currentSpeakerActive;
     const amHuman = myMember?.kind === 'human';
 
-    speechBtn.disabled = !(amICurrentSpeaker || firstSpeakerClaimOpen);
-    speechBtn.textContent = isSpeaking ? 'End Speaking' : (firstSpeakerClaimOpen ? 'Claim First Turn' : 'Start Speaking');
+    // Three-state button logic:
+    // 1. Speaking -> "End Speaking"
+    // 2. Stopped speaking, awaiting next speaker selection -> "Select Next Speaker"
+    // 3. Not speaking, not awaiting selection -> "Start Speaking" / "Claim First Turn"
+    if (isSpeaking) {
+      speechBtn.disabled = false;
+      speechBtn.textContent = 'End Speaking';
+    } else if (awaitingNextSpeakerSelection) {
+      speechBtn.disabled = false;
+      speechBtn.textContent = 'Select Next Speaker';
+    } else {
+      speechBtn.disabled = !(amICurrentSpeaker || firstSpeakerClaimOpen);
+      speechBtn.textContent = firstSpeakerClaimOpen ? 'Claim First Turn' : 'Start Speaking';
+    }
+
     interruptBtn.disabled = !(anotherSpeakerActive && amHuman && !hasSpokenThisRound);
     hintBtn.disabled = !(amICurrentSpeaker && !currentSpeakerActive);
   }
 
   /**
-   * Handle Start Speaking / End Speaking toggle.
+   * Handle Start Speaking / End Speaking / Select Next Speaker toggle.
+   *
+   * Three states:
+   * 1. Start Speaking: User is not speaking, can claim the turn
+   * 2. End Speaking: User is actively speaking, click to end
+   * 3. Select Next Speaker: User has ended speaking, needs to select who goes next
    *
    * Start Speaking:
    *   1. Request microphone via getUserMedia
@@ -261,42 +298,63 @@
    *
    * End Speaking:
    *   1. Close WHIP connection and stop mic track
-   *   2. Send stop_speaking (after showing next-speaker modal)
+   *   2. Send stop_speaking
+   *   3. Enter awaitingNextSpeakerSelection state
+   *
+   * Select Next Speaker:
+   *   1. Show next-speaker modal
    */
   async function handleSpeechToggle() {
     if (!discussionState || !ws) return;
-    if (!isSpeaking) {
-      const canStart = discussionState.currentSpeakerMemberId === myMemberId || discussionState.currentSpeakerMemberId === null;
-      if (!canStart) return;
 
+    if (isSpeaking) {
+      // State 2: Currently speaking, click to end
       const roomId = Storage.getRoomId();
-      const mediaPath = `room/${roomId}/${myMemberId}`;
-
-      // Step 1: Establish WHIP audio connection first
-      let whipOk = false;
-      try {
-        const whipResult = await Media.startWhip(roomId, myMemberId);
-        whipCleanup = whipResult.cleanup;
-        whipOk = true;
-      } catch (err) {
-        console.error('[discuss] WHIP connection failed:', err);
+      if (whipCleanup) {
+        try { whipCleanup(); } catch (_) {}
+        whipCleanup = null;
       }
-
-      // Step 2: Claim the turn — send mediaPath only if WHIP succeeded
-      isSpeaking = true;
-      ws.send({
-        type: 'start_speaking',
-        data: { mediaPath: whipOk ? mediaPath : undefined }
-      });
+      isSpeaking = false;
+      awaitingNextSpeakerSelection = true;
+      ws.send({ type: 'stop_speaking', data: {} });
       updateButtonStates();
-
-      if (!whipOk) {
-        addSystemMessage('Audio capture failed: could not connect to media server. Turn claimed without audio.');
-      }
       return;
     }
-    // End speaking — show next-speaker modal
-    showNextSpeakerModal();
+
+    if (awaitingNextSpeakerSelection) {
+      // State 3: Already stopped speaking, click to select next speaker
+      showNextSpeakerModal();
+      return;
+    }
+
+    // State 1: Start speaking
+    const canStart = discussionState.currentSpeakerMemberId === myMemberId || discussionState.currentSpeakerMemberId === null;
+    if (!canStart) return;
+
+    const roomId = Storage.getRoomId();
+    const mediaPath = `room/${roomId}/${myMemberId}`;
+
+    // Step 1: Establish WHIP audio connection first
+    let whipOk = false;
+    try {
+      const whipResult = await Media.startWhip(roomId, myMemberId);
+      whipCleanup = whipResult.cleanup;
+      whipOk = true;
+    } catch (err) {
+      console.error('[discuss] WHIP connection failed:', err);
+    }
+
+    // Step 2: Claim the turn — send mediaPath only if WHIP succeeded
+    isSpeaking = true;
+    ws.send({
+      type: 'start_speaking',
+      data: { mediaPath: whipOk ? mediaPath : undefined }
+    });
+    updateButtonStates();
+
+    if (!whipOk) {
+      addSystemMessage('Audio capture failed: could not connect to media server. Turn claimed without audio.');
+    }
   }
 
   /**
@@ -402,11 +460,10 @@
     option.className = 'speaker-option';
     option.textContent = member.displayName + (member.isOwner ? ' (Owner)' : '');
     option.addEventListener('click', () => {
-      // Send stop_speaking FIRST (server needs to collect audio before stream closes)
-      ws.send({ type: 'stop_speaking', data: { nextSpeakerMemberId: member.memberId } });
+      // Send next_speaker message to assign the next speaker
+      ws.send({ type: 'next_speaker', data: { nextSpeakerMemberId: member.memberId } });
+      awaitingNextSpeakerSelection = false;
       UI.setVisible(nextSpeakerModal, false);
-      isSpeaking = false;
-      // WHIP cleanup will happen when server sends speaker_stopped
       updateButtonStates();
     });
     speakerOptions.appendChild(option);

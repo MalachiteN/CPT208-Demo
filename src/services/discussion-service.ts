@@ -127,11 +127,11 @@ export function stopSpeaking(
     return { success: false, error: "Invalid next speaker memberId" };
   }
 
-  discussion.currentSpeakerActive = false;
-
   if (interrupted) {
     discussion.hasInterruptionOccurred = true;
   }
+  // Note: currentSpeakerActive is NOT set to false here - it remains true
+  // to allow the speaker to select next speaker or allow interruptions
 
   const wasLeaderUnset = discussion.leaderMemberId === null;
   const message: ChatMessage = {
@@ -164,11 +164,13 @@ export function stopSpeaking(
     discussion.roundSpokenMemberIds = [];
   }
 
-  discussion.currentSpeakerMemberId = nextSpeakerMemberId;
+  //discussion.currentSpeakerMemberId = nextSpeakerMemberId;
   discussion.pendingInterruption = null;
 
+  // Note: We do NOT update currentSpeakerMemberId here - that's done via assignNextSpeaker
+
   const logRound = discussion.currentRound - (roundCompleted ? 1 : 0);
-  console.log(`[discussion-service] 发言结束并指派下一个: roomId=${roomId}, memberId=${memberId}, displayName=${member.displayName}, kind=${member.kind}, nextSpeakerMemberId=${nextSpeakerMemberId}, round=${logRound}, roundCompleted=${roundCompleted}, interrupted=${interrupted}`);
+  console.log(`[discussion-service] 发言结束: roomId=${roomId}, memberId=${memberId}, displayName=${member.displayName}, kind=${member.kind}, round=${logRound}, roundCompleted=${roundCompleted}, interrupted=${interrupted}`);
 
   RoomStore.updateRoom(room);
 
@@ -176,6 +178,42 @@ export function stopSpeaking(
     success: true,
     data: { room, message, roundCompleted },
   };
+}
+
+export function assignNextSpeaker(
+  roomId: string,
+  nextSpeakerMemberId: string | null
+): ServiceResult<Room> {
+  const room = RoomStore.getRoom(roomId);
+  if (!room) {
+    return { success: false, error: "Room not found" };
+  }
+
+  if (room.phase !== "discuss") {
+    return { success: false, error: "Room is not in discuss phase" };
+  }
+
+  const discussion = room.discussion;
+  if (!discussion) {
+    return { success: false, error: "Discussion not initialized" };
+  }
+
+  // Validate next speaker if provided
+  if (nextSpeakerMemberId !== null) {
+    const nextMember = room.members.find((m) => m.memberId === nextSpeakerMemberId);
+    if (!nextMember) {
+      return { success: false, error: "Next speaker not found" };
+    }
+  }
+
+  discussion.currentSpeakerMemberId = nextSpeakerMemberId;
+  discussion.currentSpeakerActive = false; // New speaker hasn't started speaking yet
+
+  console.log(`[discussion-service] 指派下一个发言人: roomId=${roomId}, nextSpeakerMemberId=${nextSpeakerMemberId}`);
+
+  RoomStore.updateRoom(room);
+
+  return { success: true, data: room };
 }
 
 /**
@@ -291,7 +329,7 @@ export function resolveInterrupt(
   roomId: string,
   accepted: boolean
 ): ServiceResult<{ room: Room; accepted: boolean; fromMemberId: string; toMemberId: string; interruptedMessage?: ChatMessage }> {
-  const room = RoomStore.getRoom(roomId);
+  let room = RoomStore.getRoom(roomId);
   if (!room) {
     return { success: false, error: "Room not found" };
   }
@@ -314,11 +352,19 @@ export function resolveInterrupt(
   let interruptedMessage: ChatMessage | undefined;
 
   if (accepted) {
-    const interruptedResult = stopSpeaking(roomId, toMemberId, fromMemberId, true);
+    // Step 1: Stop the current speaker (without assigning next)
+    const interruptedResult = stopSpeaking(roomId, toMemberId, null, true);
     if (!interruptedResult.success || !interruptedResult.data) {
       return { success: false, error: interruptedResult.error || "Failed to apply interruption" };
     }
     interruptedMessage = interruptedResult.data.message;
+
+    // Step 2: Assign the interrupter as the next speaker
+    const assignResult = assignNextSpeaker(roomId, fromMemberId);
+    if (!assignResult.success || !assignResult.data) {
+      return { success: false, error: assignResult.error || "Failed to assign interrupter as next speaker" };
+    }
+    room = assignResult.data;
   } else {
     discussion.pendingInterruption = null;
     RoomStore.updateRoom(room);
@@ -415,6 +461,7 @@ export const DiscussionService = {
   startSpeaking,
   stopSpeaking,
   stopSpeakingAndTranscribe,
+  assignNextSpeaker,
   requestInterrupt,
   resolveInterrupt,
   canInterrupt,

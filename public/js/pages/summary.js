@@ -163,7 +163,7 @@
     valueEveryone.textContent = rubrics.everyoneSpoke === null ? 'N/A' : rubrics.everyoneSpoke ? 'Yes' : 'No';
     emojiInterruption.textContent = rubrics.hasValidInterruption ? '✅' : '❌';
     valueInterruption.textContent = rubrics.hasValidInterruption ? 'Yes' : 'No';
-    emojiLeader.textContent = rubrics.leaderSameAsLastSpeaker === null ? '➖' : rubrics.leaderSameAsLastSpeaker ? '❌' : '✅';
+    emojiLeader.textContent = rubrics.leaderSameAsLastSpeaker === null ? '➖' : rubrics.leaderSameAsLastSpeaker ? '✅' : '❌';
     valueLeader.textContent = rubrics.leaderSameAsLastSpeaker === null ? 'N/A' : rubrics.leaderSameAsLastSpeaker ? 'Same' : 'Different';
     leaderValue.textContent = rubrics.leaderMemberId || 'N/A';
   }

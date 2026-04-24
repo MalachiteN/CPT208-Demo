@@ -6,6 +6,7 @@ import {
   isHelloMessage,
   isInterruptRequestMessage,
   isInterruptResponseMessage,
+  isNextSpeakerMessage,
   isPingMessage,
   isStartSpeakingMessage,
   isStopSpeakingMessage,
@@ -27,6 +28,7 @@ interface DiscussionService {
   startSpeaking(roomId: string, memberId: string, mediaPath?: string, callbacks?: { onRecordingStarted?: () => void }): { success: boolean; error?: string; data?: { room: Room; isFirstSpeaker?: boolean; mediaPath?: string } };
   stopSpeaking(roomId: string, memberId: string, nextSpeakerMemberId: string | null, interrupted?: boolean, overrideText?: string): { success: boolean; error?: string; data?: { room: Room; message: import("../models/types").ChatMessage; roundCompleted: boolean } };
   stopSpeakingAndTranscribe(roomId: string, memberId: string, nextSpeakerMemberId: string | null, interrupted?: boolean): Promise<{ success: boolean; error?: string; data?: { room: Room; message: import("../models/types").ChatMessage; roundCompleted: boolean } }>;
+  assignNextSpeaker(roomId: string, nextSpeakerMemberId: string | null): { success: boolean; error?: string; data?: Room };
   requestInterrupt(roomId: string, fromMemberId: string, targetSpeakerMemberId: string): { success: boolean; error?: string };
   resolveInterrupt(roomId: string, accepted: boolean): { success: boolean; error?: string; data?: { room: Room; accepted: boolean; fromMemberId: string; toMemberId: string; interruptedMessage?: import("../models/types").ChatMessage } };
   canInterrupt(roomId: string, memberId: string): boolean;
@@ -124,8 +126,13 @@ function handleMessage(socket: WebSocket, uuid: string, roomId: string, memberId
       return;
     }
     if (isStopSpeakingMessage(message)) {
-      handleStopSpeaking(uuid, roomId, memberId, message.data.nextSpeakerMemberId)
+      handleStopSpeaking(uuid, roomId, memberId)
         .catch((err) => console.error(`[discuss-ws] handleStopSpeaking error:`, err));
+      return;
+    }
+    if (isNextSpeakerMessage(message)) {
+      handleNextSpeaker(uuid, roomId, memberId, message.data.nextSpeakerMemberId)
+        .catch((err) => console.error(`[discuss-ws] handleNextSpeaker error:`, err));
       return;
     }
     if (isInterruptRequestMessage(message)) {
@@ -247,7 +254,7 @@ function handleStartSpeaking(uuid: string, roomId: string, memberId: string, med
   }
 }
 
-async function handleStopSpeaking(uuid: string, roomId: string, memberId: string, nextSpeakerMemberId: string | null): Promise<void> {
+async function handleStopSpeaking(uuid: string, roomId: string, memberId: string): Promise<void> {
   if (!discussionService || !roomStore) return;
 
   // Check the member to determine if this is a human or bot
@@ -262,10 +269,10 @@ async function handleStopSpeaking(uuid: string, roomId: string, memberId: string
 
   if (member?.kind === "human") {
     // Human speaker: stop audio collection, transcribe, then finalize
-    result = await discussionService.stopSpeakingAndTranscribe(roomId, memberId, nextSpeakerMemberId);
+    result = await discussionService.stopSpeakingAndTranscribe(roomId, memberId, null);
   } else {
     // Bot speaker or fallback: use synchronous stop
-    result = discussionService.stopSpeaking(roomId, memberId, nextSpeakerMemberId);
+    result = discussionService.stopSpeaking(roomId, memberId, null);
   }
 
   if (!result.success || !result.data) {
@@ -277,15 +284,25 @@ async function handleStopSpeaking(uuid: string, roomId: string, memberId: string
   connectionManager.broadcastToRoomDiscuss(roomId, { type: "speaker_stopped", data: { memberId } });
   connectionManager.broadcastToRoomDiscuss(roomId, { type: "message_created", data: { message } });
   broadcastDiscussionState(updatedRoom);
-  console.log(`[discuss-ws] 发言结束广播完成: roomId=${roomId}, memberId=${memberId}, nextSpeakerMemberId=${nextSpeakerMemberId}`);
+  console.log(`[discuss-ws] 发言结束广播完成: roomId=${roomId}, memberId=${memberId}`);
+  // Note: next speaker assignment is now done via separate next_speaker message
+}
 
-  if (nextSpeakerMemberId) {
-    const nextSpeaker = updatedRoom.members.find((m) => m.memberId === nextSpeakerMemberId);
-    if (nextSpeaker?.kind === "bot") {
-      console.log(`[discuss-ws] 下一位发言者为bot，触发bot发言: roomId=${updatedRoom.roomId}, nextSpeakerMemberId=${nextSpeakerMemberId}`);
-    }
+async function handleNextSpeaker(uuid: string, roomId: string, memberId: string, nextSpeakerMemberId: string): Promise<void> {
+  if (!discussionService || !roomStore) return;
+
+  const result = discussionService.assignNextSpeaker(roomId, nextSpeakerMemberId);
+  if (!result.success || !result.data) {
+    connectionManager.sendToDiscussUser(uuid, { type: "error", data: { msg: result.error || "Cannot assign next speaker" } });
+    return;
   }
-  triggerAssignedBotTurn(updatedRoom, nextSpeakerMemberId);
+
+  const room = result.data;
+  broadcastDiscussionState(room);
+  console.log(`[discuss-ws] 下一位发言人已指派: roomId=${roomId}, nextSpeakerMemberId=${nextSpeakerMemberId}`);
+
+  // If next speaker is a bot, trigger it
+  triggerAssignedBotTurn(room, nextSpeakerMemberId);
 }
 
 function handleInterruptRequest(uuid: string, roomId: string, fromMemberId: string, targetMemberId: string): void {
@@ -332,14 +349,22 @@ function handleBotInterrupt(room: Room, interrupter: Member, botMember: Member):
   botService.interruptBot(room.roomId, botMember.memberId);
 
   const interruptedText = partialText || `[Bot turn interrupted: ${botMember.displayName}]`;
+
+  // Step 1: Stop the bot speaking (without assigning next speaker)
   const stopResult = discussionService.stopSpeaking(
     room.roomId,
     botMember.memberId,
-    interrupter.memberId,
+    null,
     true,
     interruptedText,
   );
   if (!stopResult.success || !stopResult.data) {
+    return;
+  }
+
+  // Step 2: Assign the interrupter as the next speaker
+  const assignResult = discussionService.assignNextSpeaker(room.roomId, interrupter.memberId);
+  if (!assignResult.success || !assignResult.data) {
     return;
   }
 
@@ -353,11 +378,13 @@ function handleBotInterrupt(room: Room, interrupter: Member, botMember: Member):
   });
   connectionManager.broadcastToRoomDiscuss(room.roomId, { type: "speaker_stopped", data: { memberId: botMember.memberId } });
   connectionManager.broadcastToRoomDiscuss(room.roomId, { type: "message_created", data: { message: stopResult.data.message } });
+  broadcastDiscussionState(assignResult.data);
+
+  // Step 3: Broadcast that the interrupter has started speaking (they're auto-assigned and active)
   connectionManager.broadcastToRoomDiscuss(room.roomId, {
     type: "speaker_started",
     data: { memberId: interrupter.memberId, displayName: interrupter.displayName },
   });
-  broadcastDiscussionState(stopResult.data.room);
 }
 
 function handleInterruptResponse(uuid: string, roomId: string, memberId: string, accepted: boolean): void {
@@ -387,10 +414,18 @@ function handleInterruptResponse(uuid: string, roomId: string, memberId: string,
   });
 
   if (accepted) {
+    // Step 1: Broadcast speaker_stopped for the interrupted speaker
     connectionManager.broadcastToRoomDiscuss(roomId, { type: "speaker_stopped", data: { memberId: toMemberId } });
+
+    // Step 2: Broadcast the interrupted message if any
     if (interruptedMessage) {
       connectionManager.broadcastToRoomDiscuss(roomId, { type: "message_created", data: { message: interruptedMessage } });
     }
+
+    // Step 3: Broadcast the new state (with interrupter assigned as next speaker)
+    broadcastDiscussionState(room);
+
+    // Step 4: Broadcast speaker_started for the interrupter (they're now active)
     const interrupter = room.members.find((m) => m.memberId === fromMemberId);
     if (interrupter) {
       connectionManager.broadcastToRoomDiscuss(roomId, {
@@ -398,9 +433,9 @@ function handleInterruptResponse(uuid: string, roomId: string, memberId: string,
         data: { memberId: fromMemberId, displayName: interrupter.displayName },
       });
     }
+  } else {
+    broadcastDiscussionState(room);
   }
-
-  broadcastDiscussionState(room);
 }
 
 async function handleAskHint(uuid: string, roomId: string, memberId: string): Promise<void> {
@@ -442,13 +477,27 @@ function startBotStreaming(room: Room, botMember: Member): void {
         return;
       }
 
+      // Step 1: Stop the bot speaking (without assigning next speaker)
+      const stopResult = discussionSvc.stopSpeaking(currentRoom.roomId, botMember.memberId, null, false, fullText);
+      if (!stopResult.success || !stopResult.data) {
+        return;
+      }
+
+      // Broadcast speaker_stopped and message_created
+      connectionManager.broadcastToRoomDiscuss(currentRoom.roomId, { type: "speaker_stopped", data: { memberId: botMember.memberId } });
+      connectionManager.broadcastToRoomDiscuss(currentRoom.roomId, { type: "message_created", data: { message: stopResult.data.message } });
+
+      // Step 2: Pick and assign the next speaker automatically (for bot turns)
       const nextSpeakerMemberId = pickNextSpeakerAfterBot(currentRoom, botMember.memberId);
-      const stopResult = discussionSvc.stopSpeaking(currentRoom.roomId, botMember.memberId, nextSpeakerMemberId, false, fullText);
-      if (stopResult.success && stopResult.data) {
-        connectionManager.broadcastToRoomDiscuss(currentRoom.roomId, { type: "speaker_stopped", data: { memberId: botMember.memberId } });
-        connectionManager.broadcastToRoomDiscuss(currentRoom.roomId, { type: "message_created", data: { message: stopResult.data.message } });
+      if (nextSpeakerMemberId) {
+        const assignResult = discussionSvc.assignNextSpeaker(currentRoom.roomId, nextSpeakerMemberId);
+        if (assignResult.success && assignResult.data) {
+          broadcastDiscussionState(assignResult.data);
+          triggerAssignedBotTurn(assignResult.data, nextSpeakerMemberId);
+        }
+      } else {
+        // No next speaker, just broadcast the state after stop
         broadcastDiscussionState(stopResult.data.room);
-        triggerAssignedBotTurn(stopResult.data.room, nextSpeakerMemberId);
       }
     }
   );
