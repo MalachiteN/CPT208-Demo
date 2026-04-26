@@ -6,28 +6,43 @@ import { LlmService } from "./llm-service";
 
 const FALLBACK_HINT = "You may begin by clearly stating your main opinion.";
 
+export interface HintCallbacks {
+  onChunk: (chunk: string, reasoningChunk?: string) => void;
+  onDone: (fullText: string, reasoningContent?: string) => void;
+}
+
 /**
- * Generate a real AI hint for the given room member.
+ * Generate a real AI hint for the given room member (streaming).
  *
  * Validates via discussion-service canRequestHint (only the assigned
  * current speaker who has not yet started speaking may request a hint).
  * Assembles the hint prompt with shared discussion history, then calls
- * the LLM with HINT_MODEL in non-streaming mode.
+ * the LLM with HINT_MODEL in streaming mode.
  *
- * Returns the hint text, or a fallback string on validation failure or
- * LLM error.
+ * Delivers chunks via `callbacks.onChunk` and the final result via
+ * `callbacks.onDone`. On validation failure or LLM error the fallback
+ * text is still delivered through the callbacks so the caller only has
+ * to handle the streaming interface.
  */
-export async function generateHint(room: Room, memberId: string): Promise<string> {
+export async function generateHint(
+  room: Room,
+  memberId: string,
+  callbacks: HintCallbacks,
+): Promise<void> {
   // Validate via discussion-service
   const canHint = DiscussionService.canRequestHint(room.roomId, memberId);
   if (!canHint.success) {
-    return FALLBACK_HINT;
+    callbacks.onChunk(FALLBACK_HINT);
+    callbacks.onDone(FALLBACK_HINT);
+    return;
   }
 
   // Find the requesting member
   const member = room.members.find((m) => m.memberId === memberId);
   if (!member) {
-    return FALLBACK_HINT;
+    callbacks.onChunk(FALLBACK_HINT);
+    callbacks.onDone(FALLBACK_HINT);
+    return;
   }
 
   // Assemble prompt
@@ -38,9 +53,19 @@ export async function generateHint(room: Room, memberId: string): Promise<string
     userDisplayName: member.displayName,
   });
 
-  // Call LLM (non-streaming)
-  const result = await LlmService.completeHintCompletion(systemPrompt, userPrompt);
-  return result.text;
+  // Call LLM (streaming)
+  await LlmService.streamChatCompletion(
+    LlmService.getModelForCallType("hint"),
+    systemPrompt,
+    userPrompt,
+    {
+      onChunk: callbacks.onChunk,
+      onDone: (fullText, _wasFallback, reasoningContent) => {
+        callbacks.onDone(fullText, reasoningContent);
+      },
+    },
+    FALLBACK_HINT,
+  );
 }
 
 export const HintService = {

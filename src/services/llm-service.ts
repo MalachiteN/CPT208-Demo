@@ -21,8 +21,8 @@ import { config } from "../config/index.js";
 export type LlmCallType = "roleplay" | "hint" | "summary";
 
 export interface StreamCallbacks {
-  onChunk: (chunk: string) => void;
-  onDone: (fullText: string, wasFallback: boolean) => void;
+  onChunk: (chunk: string, reasoningChunk?: string) => void;
+  onDone: (fullText: string, wasFallback: boolean, reasoningContent?: string) => void;
 }
 
 export interface LlmError {
@@ -56,6 +56,7 @@ interface ChatCompletionRequest {
   model: string;
   stream: boolean;
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  thinking?: { type: "enabled" | "disabled" };
 }
 
 function buildRequestBody(
@@ -63,8 +64,9 @@ function buildRequestBody(
   systemPrompt: string,
   userPrompt: string,
   stream: boolean,
+  disableThinking?: boolean,
 ): ChatCompletionRequest {
-  return {
+  const body: ChatCompletionRequest = {
     model,
     stream,
     messages: [
@@ -72,6 +74,12 @@ function buildRequestBody(
       { role: "user", content: userPrompt },
     ],
   };
+
+  if (disableThinking) {
+    body.thinking = { type: "disabled" };
+  }
+
+  return body;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,12 +112,13 @@ function getHeaders(): Record<string, string> {
  */
 async function consumeSseStream(
   body: ReadableStream<Uint8Array>,
-  onChunk: (chunk: string) => void,
+  onChunk: (chunk: string, reasoningChunk?: string) => void,
   abortSignal?: AbortSignal,
-): Promise<string> {
+): Promise<{ content: string; reasoningContent: string }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let accumulated = "";
+  let reasoningAccumulated = "";
   let buffer = "";
 
   try {
@@ -131,7 +140,7 @@ async function consumeSseStream(
         if (!trimmed || trimmed.startsWith(":")) continue; // skip empty/comments
 
         if (trimmed === "data: [DONE]") {
-          return accumulated;
+          return { content: accumulated, reasoningContent: reasoningAccumulated };
         }
 
         if (trimmed.startsWith("data: ")) {
@@ -140,9 +149,14 @@ async function consumeSseStream(
             const parsed = JSON.parse(jsonStr);
             const content: string | undefined =
               parsed?.choices?.[0]?.delta?.content;
+            const reasoningContent: string | undefined =
+              parsed?.choices?.[0]?.delta?.reasoning_content;
             if (content) {
               accumulated += content;
-              onChunk(content);
+              onChunk(content, reasoningContent);
+            } else if (reasoningContent) {
+              reasoningAccumulated += reasoningContent;
+              onChunk("", reasoningContent);
             }
           } catch {
             // Skip malformed JSON chunks — some providers emit extra whitespace
@@ -155,7 +169,7 @@ async function consumeSseStream(
     reader.releaseLock();
   }
 
-  return accumulated;
+  return { content: accumulated, reasoningContent: reasoningAccumulated };
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +187,7 @@ async function consumeSseStream(
  *                    ends (or fallback text on error).
  * @param fallbackText  Text to deliver via onDone if the LLM call fails entirely.
  * @param abortSignal  Optional AbortSignal for cancelling the in-flight request.
+ * @param disableThinking  Optional flag to disable model thinking (Moonshot API)
  */
 export async function streamChatCompletion(
   model: string,
@@ -181,9 +196,10 @@ export async function streamChatCompletion(
   callbacks: StreamCallbacks,
   fallbackText: string,
   abortSignal?: AbortSignal,
+  disableThinking?: boolean,
 ): Promise<void> {
   const url = getChatCompletionsUrl();
-  const body = buildRequestBody(model, systemPrompt, userPrompt, true);
+  const body = buildRequestBody(model, systemPrompt, userPrompt, true, disableThinking);
 
   try {
     const response = await fetch(url, {
@@ -210,12 +226,12 @@ export async function streamChatCompletion(
       return;
     }
 
-    const fullText = await consumeSseStream(
+    const { content: fullText, reasoningContent } = await consumeSseStream(
       response.body,
       callbacks.onChunk,
       abortSignal,
     );
-    callbacks.onDone(fullText, false);
+    callbacks.onDone(fullText, false, reasoningContent);
   } catch (err: unknown) {
     if (abortSignal?.aborted) {
       // Abort is a normal lifecycle event (human interrupting a bot).
@@ -240,6 +256,7 @@ export async function streamChatCompletion(
  * @param systemPrompt  System prompt text
  * @param userPrompt    User prompt text
  * @param fallbackText  Text to return if the LLM call fails.
+ * @param disableThinking  Optional flag to disable model thinking (Moonshot API)
  * @returns The completion text, or fallbackText on failure.
  */
 export async function completeChatCompletion(
@@ -247,9 +264,10 @@ export async function completeChatCompletion(
   systemPrompt: string,
   userPrompt: string,
   fallbackText: string,
-): Promise<{ text: string; wasFallback: boolean }> {
+  disableThinking?: boolean,
+): Promise<{ text: string; wasFallback: boolean; reasoningContent?: string }> {
   const url = getChatCompletionsUrl();
-  const body = buildRequestBody(model, systemPrompt, userPrompt, false);
+  const body = buildRequestBody(model, systemPrompt, userPrompt, false, disableThinking);
 
   try {
     const response = await fetch(url, {
@@ -271,9 +289,10 @@ export async function completeChatCompletion(
     const firstChoice = choices[0] as Record<string, unknown> | undefined;
     const message = firstChoice?.message as Record<string, unknown> | undefined;
     const content: string | undefined = typeof message?.content === "string" ? message.content : undefined;
+    const reasoningContent: string | undefined = typeof message?.reasoning_content === "string" ? message.reasoning_content : undefined;
 
     if (typeof content === "string" && content.length > 0) {
-      return { text: content, wasFallback: false };
+      return { text: content, wasFallback: false, reasoningContent };
     }
 
     console.error("[llm-service] completeChatCompletion: empty or missing content in response");
@@ -305,6 +324,7 @@ export async function streamRoleplayCompletion(
     callbacks,
     "[Bot failed to generate a response]",
     abortSignal,
+    config.disableThinkingRoleplay,
   );
 }
 
@@ -315,12 +335,13 @@ export async function streamRoleplayCompletion(
 export async function completeHintCompletion(
   systemPrompt: string,
   userPrompt: string,
-): Promise<{ text: string; wasFallback: boolean }> {
+): Promise<{ text: string; wasFallback: boolean; reasoningContent?: string }> {
   return completeChatCompletion(
     getModelForCallType("hint"),
     systemPrompt,
     userPrompt,
     "[Could not generate a hint at this time]",
+    config.disableThinkingHint,
   );
 }
 
@@ -341,6 +362,7 @@ export async function streamSummaryCompletion(
     callbacks,
     "[Could not generate evaluation]",
     abortSignal,
+    config.disableThinkingSummary,
   );
 }
 

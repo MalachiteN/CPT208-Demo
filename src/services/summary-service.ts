@@ -3,7 +3,7 @@ import { RoomStore } from "../stores/room-store";
 import { ServiceResult } from "../models/types";
 import { PromptService } from "./prompt-service";
 import { DiscussionPromptBuilder } from "./discussion-prompt-builder";
-import { LlmService, StreamCallbacks } from "./llm-service";
+import { LlmService } from "./llm-service";
 
 function computeSummaryState(room: Room): SummaryState {
   const discussion = room.discussion;
@@ -98,8 +98,8 @@ export function getFixedRubrics(roomId: string): ServiceResult<SummaryState["fix
 export async function startSummaryStream(
   roomId: string,
   callbacks: {
-    onChunk: (chunk: string) => void;
-    onDone: (fullText: string) => void;
+    onChunk: (chunk: string, reasoningChunk?: string) => void;
+    onDone: (fullText: string, reasoningContent?: string) => void;
   }
 ): Promise<void> {
   const room = RoomStore.getRoom(roomId);
@@ -143,16 +143,16 @@ export async function startSummaryStream(
 
   const fallbackText = "[Could not generate evaluation]";
 
-  const streamCallbacks: StreamCallbacks = {
-    onChunk: (chunk: string) => {
+  const streamCallbacks = {
+    onChunk: (chunk: string, reasoningChunk?: string) => {
       const rm = RoomStore.getRoom(roomId);
       if (!rm || !rm.summary) return;
       rm.summary.llmSummaryText += chunk;
       rm.summary.llmSummaryCursor += chunk.length;
       RoomStore.updateRoom(rm);
-      callbacks.onChunk(chunk);
+      callbacks.onChunk(chunk, reasoningChunk);
     },
-    onDone: (fullText: string, wasFallback: boolean) => {
+    onDone: (fullText: string, wasFallback: boolean, reasoningContent?: string) => {
       const rm = RoomStore.getRoom(roomId);
       if (rm && rm.summary) {
         rm.summary.llmSummaryText = wasFallback ? fallbackText : fullText;
@@ -160,7 +160,7 @@ export async function startSummaryStream(
         rm.summary.llmSummaryCursor = rm.summary.llmSummaryText.length;
         RoomStore.updateRoom(rm);
       }
-      callbacks.onDone(wasFallback ? fallbackText : fullText);
+      callbacks.onDone(wasFallback ? fallbackText : fullText, reasoningContent);
     },
   };
 

@@ -18,8 +18,8 @@ interface SummaryService {
   startSummaryStream(
     roomId: string,
     callbacks: {
-      onChunk: (chunk: string) => void;
-      onDone: (fullText: string) => void;
+      onChunk: (chunk: string, reasoningChunk?: string) => void;
+      onDone: (fullText: string, reasoningContent?: string) => void;
     }
   ): Promise<void>;
 }
@@ -148,9 +148,10 @@ function ensureSummaryStream(roomId: string): void {
   // Check if already done
   if (room.summary?.llmSummaryStatus === "done") {
     // Re-emit to any late joiners — the full text is already stored
+    const summary = room.summary as { llmSummaryText: string; llmSummaryReasoningContent?: string };
     connectionManager.broadcastToRoomSummary(roomId, {
       type: "summary_done",
-      data: { fullText: room.summary.llmSummaryText },
+      data: { fullText: summary.llmSummaryText, reasoningContent: summary.llmSummaryReasoningContent },
     });
     return;
   }
@@ -158,16 +159,16 @@ function ensureSummaryStream(roomId: string): void {
   streamingRooms.add(roomId);
 
   service.startSummaryStream(roomId, {
-    onChunk: (chunk: string) => {
+    onChunk: (chunk: string, reasoningChunk?: string) => {
       connectionManager.broadcastToRoomSummary(roomId, {
         type: "summary_stream",
-        data: { chunk },
+        data: { chunk, reasoningContent: reasoningChunk },
       });
     },
-    onDone: (fullText: string) => {
+    onDone: (fullText: string, reasoningContent?: string) => {
       connectionManager.broadcastToRoomSummary(roomId, {
         type: "summary_done",
-        data: { fullText },
+        data: { fullText, reasoningContent },
       });
       streamingRooms.delete(roomId);
     },

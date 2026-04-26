@@ -244,6 +244,23 @@ export interface HintMessage {
   type: "hint";
   data: {
     text: string;
+    reasoningContent?: string;
+  };
+}
+
+export interface HintStreamMessage {
+  type: "hint_stream";
+  data: {
+    chunk: string;
+    reasoningChunk?: string;
+  };
+}
+
+export interface HintDoneMessage {
+  type: "hint_done";
+  data: {
+    fullText: string;
+    reasoningContent?: string;
   };
 }
 
@@ -286,6 +303,7 @@ export interface SummaryStreamMessage {
   type: "summary_stream";
   data: {
     chunk: string;
+    reasoningContent?: string;
   };
 }
 
@@ -293,6 +311,7 @@ export interface SummaryDoneMessage {
   type: "summary_done";
   data: {
     fullText: string;
+    reasoningContent?: string;
   };
 }
 
@@ -311,6 +330,8 @@ export type ServerMessage =
   | InterruptRequestedMessage
   | InterruptResolvedMessage
   | HintMessage
+  | HintStreamMessage
+  | HintDoneMessage
   | BotStreamMessage
   | BotDoneMessage
   | DiscussionEndedMessage

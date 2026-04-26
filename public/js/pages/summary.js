@@ -14,6 +14,7 @@
 
   let ws = null;
   let summaryTextContent = '';
+  let reasoningTextContent = '';
 
   function recoverToCurrentPhase(result, fallbackMessage) {
     if (!result?.data) {
@@ -128,8 +129,12 @@
       updateFixedRubrics(roomData.summary.fixedRubrics);
       updateStats(roomData.discussion, roomData.members);
       summaryTextContent = roomData.summary.llmSummaryText || '';
+      reasoningTextContent = roomData.summary.reasoningContent || '';
       summaryText.classList.add('markdown-content');
-      summaryText.innerHTML = UI.renderMarkdown(summaryTextContent);
+      const reasoningHtml = reasoningTextContent
+        ? `<div class="reasoning-block">${UI.renderMarkdown(reasoningTextContent)}</div>`
+        : '';
+      summaryText.innerHTML = reasoningHtml + UI.renderMarkdown(summaryTextContent);
     }
     return true;
   }
@@ -141,13 +146,26 @@
     });
     ws.on('summary_fixed', (message) => message.data && updateFixedRubrics(message.data));
     ws.on('summary_stream', (message) => {
-      if (!message.data?.chunk) return;
-      summaryTextContent += message.data.chunk;
-      summaryText.innerHTML = UI.renderMarkdown(summaryTextContent);
+      if (message.data?.reasoningContent) {
+        reasoningTextContent += message.data.reasoningContent;
+      }
+      if (message.data?.chunk) {
+        summaryTextContent += message.data.chunk;
+      }
+      const reasoningHtml = reasoningTextContent
+        ? `<div class="reasoning-block">${UI.renderMarkdown(reasoningTextContent)}</div>`
+        : '';
+      summaryText.innerHTML = reasoningHtml + UI.renderMarkdown(summaryTextContent);
     });
     ws.on('summary_done', (message) => {
       summaryTextContent = message.data?.fullText || summaryTextContent;
-      summaryText.innerHTML = UI.renderMarkdown(summaryTextContent);
+      if (message.data?.reasoningContent) {
+        reasoningTextContent = message.data.reasoningContent;
+      }
+      const reasoningHtml = reasoningTextContent
+        ? `<div class="reasoning-block">${UI.renderMarkdown(reasoningTextContent)}</div>`
+        : '';
+      summaryText.innerHTML = reasoningHtml + UI.renderMarkdown(summaryTextContent);
     });
     ws.on('room_closed', () => {
       if (ws) ws.close();

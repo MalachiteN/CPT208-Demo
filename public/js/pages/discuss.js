@@ -25,6 +25,7 @@
   let currentSpeakerActive = false;
   let awaitingNextSpeakerSelection = false;
   let botDrafts = new Map();
+  let hintDraft = null;
 
   // Audio state
   let whipCleanup = null;   // cleanup function for WHIP publish connection
@@ -205,7 +206,8 @@
     });
     ws.on('interrupt_requested', (message) => showInterruptModal(message.data?.fromDisplayName));
     ws.on('interrupt_resolved', () => UI.setVisible(interruptModal, false));
-    ws.on('hint', (message) => message.data?.text && addSystemMessage(`AI Hint: ${message.data.text}`));
+    ws.on('hint_stream', (message) => handleHintStream(message.data));
+    ws.on('hint_done', (message) => handleHintDone(message.data));
     ws.on('bot_stream', (message) => handleBotStream(message.data));
     ws.on('bot_done', (message) => handleBotDone(message.data));
     ws.on('discussion_ended', () => {
@@ -561,6 +563,65 @@
     botDrafts.delete(memberId);
   }
 
+  function ensureHintDraft() {
+    if (hintDraft) {
+      return hintDraft;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chat-message system';
+    const speaker = document.createElement('div');
+    speaker.className = 'chat-speaker';
+    speaker.textContent = 'System';
+    const text = document.createElement('div');
+    text.className = 'chat-text markdown-content';
+    wrapper.appendChild(speaker);
+    wrapper.appendChild(text);
+    messageList.appendChild(wrapper);
+
+    hintDraft = { wrapper, element: text, text: '', reasoningText: '' };
+    scrollMessagesToBottom();
+    return hintDraft;
+  }
+
+  function removeHintDraft() {
+    if (!hintDraft) return;
+    hintDraft.wrapper.remove();
+    hintDraft = null;
+  }
+
+  function handleHintStream(data) {
+    if (!data?.chunk && !data?.reasoningChunk) return;
+    const draft = ensureHintDraft();
+    draft.text += data.chunk || '';
+    draft.reasoningText += data.reasoningChunk || '';
+    let html = '';
+    if (draft.reasoningText) {
+      html += `<div class="reasoning-block">${UI.renderMarkdown(draft.reasoningText)}</div>`;
+    }
+    html += UI.renderMarkdown(`AI Hint: ${draft.text}`);
+    draft.element.innerHTML = html;
+    scrollMessagesToBottom();
+  }
+
+  function handleHintDone(data) {
+    if (!data) return;
+    const draft = ensureHintDraft();
+    draft.text = data.fullText || draft.text;
+    if (data.reasoningContent) {
+      draft.reasoningText = data.reasoningContent;
+    }
+    let html = '';
+    if (draft.reasoningText) {
+      html += `<div class="reasoning-block">${UI.renderMarkdown(draft.reasoningText)}</div>`;
+    }
+    html += UI.renderMarkdown(`AI Hint: ${draft.text}`);
+    draft.element.innerHTML = html;
+    draft.wrapper.dataset.hintDone = 'true';
+    hintDraft = null;
+    scrollMessagesToBottom();
+  }
+
   function scrollMessagesToBottom() {
     const messageArea = document.getElementById('message-area');
     messageArea.scrollTop = messageArea.scrollHeight;
@@ -568,6 +629,21 @@
 
   function addSystemMessage(text) {
     addChatMessage({ type: 'system', text, createdAt: Date.now(), speakerDisplayName: 'System' });
+  }
+
+  function addSystemMessageHtml(html) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chat-message system';
+    const speaker = document.createElement('div');
+    speaker.className = 'chat-speaker';
+    speaker.textContent = 'System';
+    const text = document.createElement('div');
+    text.className = 'chat-text markdown-content';
+    text.innerHTML = html;
+    wrapper.appendChild(speaker);
+    wrapper.appendChild(text);
+    messageList.appendChild(wrapper);
+    scrollMessagesToBottom();
   }
 
   window.addEventListener('beforeunload', () => {

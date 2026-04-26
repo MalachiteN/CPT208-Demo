@@ -44,7 +44,14 @@ interface BotService {
 }
 
 interface HintService {
-  generateHint(room: Room, memberId: string): Promise<string>;
+  generateHint(
+    room: Room,
+    memberId: string,
+    callbacks: {
+      onChunk: (chunk: string, reasoningChunk?: string) => void;
+      onDone: (fullText: string, reasoningContent?: string) => void;
+    }
+  ): Promise<void>;
 }
 
 let userSessionStore: UserSessionStore | null = null;
@@ -450,8 +457,20 @@ async function handleAskHint(uuid: string, roomId: string, memberId: string): Pr
   const room = roomStore.getRoom(roomId);
   if (!room) return;
 
-  const text = await hintService.generateHint(room, memberId);
-  connectionManager.sendToDiscussUser(uuid, { type: "hint", data: { text } });
+  await hintService.generateHint(room, memberId, {
+    onChunk: (chunk: string, reasoningChunk?: string) => {
+      connectionManager.sendToDiscussUser(uuid, {
+        type: "hint_stream",
+        data: { chunk, reasoningChunk },
+      });
+    },
+    onDone: (fullText: string, reasoningContent?: string) => {
+      connectionManager.sendToDiscussUser(uuid, {
+        type: "hint_done",
+        data: { fullText, reasoningContent },
+      });
+    },
+  });
 }
 
 function startBotStreaming(room: Room, botMember: Member): void {

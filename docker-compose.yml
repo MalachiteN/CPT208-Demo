@@ -37,6 +37,8 @@ services:
       - "8080:8080"
     volumes:
       - ./models:/app/models:ro
+    environment:
+      - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
     deploy:
       resources:
         reservations:

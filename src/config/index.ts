@@ -21,6 +21,12 @@ export const config = {
   // External service URLs (Stage 2)
   whisperBaseUrl: process.env.WHISPER_BASEURL || "http://localhost:8080",
 
+  // LLM thinking control (per call type)
+  // Set to "true" to disable thinking for specific call types
+  disableThinkingRoleplay: process.env.DISABLE_THINKING_ROLEPLAY === "true",
+  disableThinkingHint: process.env.DISABLE_THINKING_HINT === "true",
+  disableThinkingSummary: process.env.DISABLE_THINKING_SUMMARY === "true",
+
   // mediamtx — three separate concerns:
   // WebRTC (WHIP/WHEP): port 8889
   // RTSP (audio pull):  port 8554 (hostname only, used for rtsp:// URL)
